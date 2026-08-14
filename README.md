@@ -91,8 +91,8 @@ workload.
 | `APP_MODE` | `demo` or `production` (default) |
 | `APP_PASSWORD`, `SESSION_SECRET` | required in production |
 | `GOOGLE_API_KEY` | Generative Language API key; without it the report still renders, minus the written commentary |
-| `LLM_MODEL` | default `gemini-flash-latest` (a pinned version id will 404 when retired) |
-| `LLM_USE_SCHEMA=0` | escape hatch — Gemma models handle `responseSchema` less reliably than Gemini |
+| `LLM_MODEL` | default `gemma-4-31b-it`; a `models/` prefix is accepted |
+| `LLM_USE_SCHEMA=0` | escape hatch only; Gemma **requires** the schema — see below |
 | `TRUST_PROXY` | set to `1` behind a proxy, or the rate limiter treats every visitor as one client |
 | `PUPPETEER_NO_SANDBOX` | set to `1` on Railway and most containers — see the sandbox note below |
 | `PORT` | assigned by the host |
@@ -167,6 +167,29 @@ slice is that default, and `custom` otherwise.
 
 Further environment: `DATA_PATH`, `UPLOAD_DIR`, `MAX_UPLOAD_MB` (default 250),
 `MAX_CACHED_DATASETS` (default 3). See Deployment modes above for the rest.
+
+## Choosing a model
+
+Measured against this API with the real report prompt:
+
+| Model | Result |
+|---|---|
+| `gemma-4-31b-it` | 200 in ~10s, full schema, clean prose — **the default** |
+| `gemma-4-26b-a4b-it` | hangs; no response in 90s, reproducibly |
+| `gemini-flash-latest` | works (~11s) but intermittently returns 503 under load |
+| `gemini-2.5-flash` | 404 — no longer available to new keys |
+
+Two things worth knowing:
+
+- **Gemma requires `responseSchema`.** With `responseMimeType` alone it returns
+  its reasoning as prose instead of JSON and the parse fails. This is the
+  opposite of what is often assumed, so leave `LLM_USE_SCHEMA` unset.
+- **Model ids churn.** Pinned versions get retired and return 404. If generation
+  starts failing, list what your key can actually see:
+  `curl -H "x-goog-api-key: $KEY" https://generativelanguage.googleapis.com/v1beta/models`
+
+Whatever happens here, the report still renders — the written commentary is the
+only part that depends on the model.
 
 ## Rate limiting
 

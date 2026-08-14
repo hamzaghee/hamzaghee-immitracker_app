@@ -28,16 +28,35 @@ const API_BASE =
   process.env.LLM_API_BASE || 'https://generativelanguage.googleapis.com/v1beta';
 const API_KEY = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
 /**
- * `-latest` rather than a pinned version: model ids are retired regularly, and
- * a hard-coded one silently 404s the day it goes. Confirmed available on this
- * API; override with LLM_MODEL for a specific model (e.g. a Gemma variant).
+ * The API lists models as "models/<id>", and the URL this builds already
+ * includes that segment — so strip the prefix rather than producing
+ * ".../models/models%2F<id>", which 404s. Copying an id straight from the
+ * models listing is the obvious thing to do, so it should just work.
  */
-const LLM_MODEL = process.env.LLM_MODEL || 'gemini-flash-latest';
+const normaliseModel = (m) => String(m || '').replace(/^models\//, '').trim();
 
 /**
- * Gemma models on this API accept `responseMimeType` but handle `responseSchema`
- * inconsistently. Set LLM_USE_SCHEMA=0 to send the mime type alone and rely on
- * the prompt plus defensive parsing.
+ * Measured on this API against the real report prompt:
+ *
+ *   gemma-4-31b-it        200 in ~10s, full schema, clean prose   <- default
+ *   gemma-4-26b-a4b-it    hangs; no response in 90s, repeatedly
+ *   gemini-flash-latest   works (~11s) but intermittently 503s under load
+ *   gemini-2.5-flash      404, no longer available to new keys
+ *
+ * Override with LLM_MODEL; a "models/" prefix is accepted.
+ */
+const LLM_MODEL = normaliseModel(process.env.LLM_MODEL) || 'gemma-4-31b-it';
+
+/**
+ * Send `responseSchema` alongside the JSON mime type.
+ *
+ * Measured against this API: Gemma **requires** the schema. With the mime type
+ * alone it returns its reasoning as prose rather than JSON, and the parse
+ * fails. (An earlier comment here claimed the reverse — that Gemma handled
+ * schemas poorly — which was an assumption, not a test.)
+ *
+ * LLM_USE_SCHEMA=0 remains as an escape hatch for a model that rejects the
+ * schema outright, but it should not be needed for Gemma or Gemini.
  */
 const USE_SCHEMA = process.env.LLM_USE_SCHEMA !== '0';
 
