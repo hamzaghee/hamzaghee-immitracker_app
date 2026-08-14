@@ -54,6 +54,10 @@ Immitracker*.json
 # Datasets uploaded through the dashboard land here at runtime.
 server/uploads/
 
+# Machine-local Claude Code settings. Embeds absolute paths from whoever ran it,
+# and is per-developer config rather than project config.
+.claude/settings.local.json
+
 # ---------- editors ----------
 .vscode/*
 !.vscode/extensions.json
