@@ -15,7 +15,7 @@
  */
 
 import { esc, fmt, PALETTE, STREAM_SLOT } from '../../../shared/chartGeometry.js';
-import { parseRichText } from '../../../shared/text.js';
+import { parseRichText, sectionTagLabel } from '../../../shared/text.js';
 import { hBar, lineChart, donut, groupedBar } from './charts.js';
 
 const sortedEntries = (obj) => Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
@@ -116,7 +116,11 @@ function analysisSection(sections) {
     ${sections
       .map(
         (sec) => `<div class="an">
-      <h4>${esc(sec.title)}${sec.source === 'computed' ? '<span class="tag">computed</span>' : ''}</h4>
+      <h4>${esc(sec.title)}${
+        sectionTagLabel(sec.source)
+          ? `<span class="tag">${esc(sectionTagLabel(sec.source))}</span>`
+          : ''
+      }</h4>
       ${richText(sec.body, sec.title)}
     </div>`
       )

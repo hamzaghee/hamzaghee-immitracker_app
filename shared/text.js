@@ -53,6 +53,29 @@ export function countryNameMap(...objects) {
   return out;
 }
 
+/* ---------------- section provenance ---------------- */
+
+/**
+ * Label for the tag on an analysis section, so a reader can tell at a glance
+ * which sentences a model wrote and which were computed from the data.
+ *
+ * Shared by the dashboard and the exported report — the two rendered the same
+ * text differently once before, and this keeps the wording in one place.
+ * CSS uppercases it, so these are written in sentence case.
+ */
+export function sectionTagLabel(source) {
+  switch (source) {
+    case 'ai':
+      return 'AI Analysis';
+    case 'computed':
+      return 'Computed';
+    case 'edited':
+      return 'Edited';
+    default:
+      return null;
+  }
+}
+
 /* ---------------- inline emphasis ---------------- */
 
 /**

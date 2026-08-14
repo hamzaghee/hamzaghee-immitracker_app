@@ -43,7 +43,9 @@ const STEP_ORDER = ['filtering', 'analysing', 'ai-analysis', 'rendering'];
 const STEP_LABELS = {
   filtering: 'Applying filters',
   analysing: 'Analysing filtered data',
-  'ai-analysis': 'Generating written analysis',
+  // Names the wait explicitly: this is the one step that takes noticeable time,
+  // so telling the reader roughly how long beats a bare label.
+  'ai-analysis': 'Generating AI Analysis. This might take a minute.',
   rendering: 'Building report',
 };
 

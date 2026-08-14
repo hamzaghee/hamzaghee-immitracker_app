@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { parseRichText } from '@shared/text.js';
+import { parseRichText, sectionTagLabel } from '@shared/text.js';
 
 const Runs = ({ runs }) =>
   runs.map((r, i) => (r.bold ? <strong key={i}>{r.text}</strong> : <span key={i}>{r.text}</span>));
@@ -83,8 +83,12 @@ export default function AnalysisSections({ sections, overrides, onChange }) {
             <div className="an-head">
               <h4>
                 {s.title}
-                {s.source === 'computed' ? <span className="badge">computed</span> : null}
-                {replaced ? <span className="badge">edited</span> : null}
+                {/* Provenance: which sentences a model wrote vs. which were computed. */}
+                {replaced ? (
+                  <span className="badge">{sectionTagLabel('edited')}</span>
+                ) : (
+                  <span className="badge">{sectionTagLabel(s.source)}</span>
+                )}
               </h4>
               <div className="an-actions">
                 {editing === s.id ? null : (
