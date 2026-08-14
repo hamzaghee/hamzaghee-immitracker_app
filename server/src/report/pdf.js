@@ -171,12 +171,19 @@ export async function htmlToPdf(html) {
       return await renderOnce(html);
     }
   } catch (err) {
-    throw Object.assign(
-      new Error(
-        `PDF rendering failed: ${err.message}. If this persists, check that Puppeteer's browser is installed ("npx puppeteer browsers install chrome").`
-      ),
-      { status: 503 }
-    );
+    // Chromium's sandbox needs unprivileged user namespaces. Most container
+    // runtimes — Railway included — don't grant them, and the raw failure is a
+    // wall of stack trace, so name the fix rather than making someone decode it.
+    const sandboxFailure = /no usable sandbox|SUID sandbox|user namespace/i.test(err.message || '');
+    const hint = sandboxFailure
+      ? 'Chromium could not start its sandbox, which containers usually cannot provide. ' +
+        'Set PUPPETEER_NO_SANDBOX=1 — see the PDF rendering notes in the README for why that is acceptable here.'
+      : 'If this persists, check that Puppeteer\'s browser is installed ("npx puppeteer browsers install chrome").';
+
+    throw Object.assign(new Error(`PDF rendering failed: ${err.message.split('\n')[0]}. ${hint}`), {
+      status: 503,
+      code: sandboxFailure ? 'PDF_SANDBOX_UNAVAILABLE' : 'PDF_FAILED',
+    });
   } finally {
     release();
     scheduleIdleShutdown();

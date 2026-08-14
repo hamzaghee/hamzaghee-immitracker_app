@@ -27,7 +27,12 @@ import { DAYS_PER_MONTH, daysToMonths } from './analyze.js';
 const API_BASE =
   process.env.LLM_API_BASE || 'https://generativelanguage.googleapis.com/v1beta';
 const API_KEY = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
-const LLM_MODEL = process.env.LLM_MODEL || 'gemini-2.0-flash';
+/**
+ * `-latest` rather than a pinned version: model ids are retired regularly, and
+ * a hard-coded one silently 404s the day it goes. Confirmed available on this
+ * API; override with LLM_MODEL for a specific model (e.g. a Gemma variant).
+ */
+const LLM_MODEL = process.env.LLM_MODEL || 'gemini-flash-latest';
 
 /**
  * Gemma models on this API accept `responseMimeType` but handle `responseSchema`

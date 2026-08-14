@@ -27,6 +27,12 @@ WORKDIR /build
 # Puppeteer downloads Chromium during install; it needs to land somewhere the
 # runtime user can read, so pin the cache to a shared path.
 ENV PUPPETEER_CACHE_DIR=/opt/puppeteer
+
+# The slim image has no unzip, and Puppeteer's browser download is a zip — the
+# install fails with "no zip archiver is available" without this.
+RUN apt-get update && apt-get install -y --no-install-recommends unzip ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY server/package*.json ./
 RUN npm ci --omit=dev
 
