@@ -1,0 +1,22 @@
+{
+  "name": "immitracker-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node port of the Immitracker Express Entry n8n workflow",
+  "scripts": {
+    "start": "node --max-old-space-size=4096 src/index.js",
+    "dev": "node --max-old-space-size=4096 --watch src/index.js",
+    "verify": "node --max-old-space-size=4096 scripts/verify-against-pin.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.6.2",
+    "multer": "^2.2.0",
+    "puppeteer": "^25.6.0"
+  },
+  "allowScripts": {
+    "puppeteer@25.6.0": true
+  }
+}

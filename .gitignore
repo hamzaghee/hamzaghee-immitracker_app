@@ -1,0 +1,74 @@
+# ---------- dependencies ----------
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+
+# ---------- build output ----------
+dist/
+dist-ssr/
+build/
+*.local
+
+# ---------- logs ----------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ---------- caches ----------
+.vite/
+.cache/
+.eslintcache
+.npm/
+*.tsbuildinfo
+
+# ---------- environment ----------
+.env
+.env.*
+!.env.example
+
+# ---------- case data ----------
+# The Immitracker exports contain real applicant records — usernames, case ids,
+# nationalities, dates. They are also ~48 MB each, which git handles badly.
+# Keep them out of version control and distribute them out of band.
+#
+# If you deliberately want the dataset versioned, delete the two lines below
+# (and consider git-lfs for the size).
+consolidated_eapr_active_cases.json
+*eapr*.json
+
+# Dated export dumps pulled from Immitracker, e.g. "2026-08-11 - Export.json".
+# These carry the same applicant records as the consolidated file.
+*Export*.json
+*export*.json
+
+# The n8n workflow export. Nothing at runtime imports it — only the offline
+# verify script — and its pinData embeds 1,061 real case records, so it stays
+# out of a repo that gets cloned to a host.
+Immitracker*.json
+
+# Datasets uploaded through the dashboard land here at runtime.
+server/uploads/
+
+# ---------- editors ----------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------- os ----------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

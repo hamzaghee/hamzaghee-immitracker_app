@@ -1,0 +1,6 @@
+{
+  "name": "immitracker-shared",
+  "private": true,
+  "type": "module",
+  "description": "Chart geometry and palette shared by the API's report renderer and the React dashboard"
+}
