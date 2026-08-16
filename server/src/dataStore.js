@@ -191,6 +191,25 @@ function seedDemoDataset() {
 }
 
 /**
+ * Moves a validated upload out of the staging directory.
+ *
+ * rename() is the fast path but only works within one filesystem. When
+ * UPLOAD_DIR is a mounted volume — any container run with persistent storage —
+ * the OS temp dir is a different device and rename() fails with EXDEV, so fall
+ * back to a copy. Only EXDEV is caught; a permissions or space error still
+ * surfaces rather than being silently retried.
+ */
+function promote(tempPath, filePath) {
+  try {
+    fs.renameSync(tempPath, filePath);
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err;
+    fs.copyFileSync(tempPath, filePath);
+    fs.rmSync(tempPath, { force: true });
+  }
+}
+
+/**
  * Adds an uploaded file to the registry. Throws (with .status) if it does not
  * parse or does not look like a case export; the temp file is removed on
  * failure so a bad upload leaves nothing behind.
@@ -204,7 +223,7 @@ export function addUpload({ tempPath, originalName }) {
     const parsed = JSON.parse(fs.readFileSync(tempPath, 'utf8'));
     const { rows, coverage } = inspectPayload(parsed);
 
-    fs.renameSync(tempPath, filePath);
+    promote(tempPath, filePath);
     const uploadedAt = new Date().toISOString();
     // Persist the summary metadata so a restart can list the dataset without
     // re-parsing the file.
