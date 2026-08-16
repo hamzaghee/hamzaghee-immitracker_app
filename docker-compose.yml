@@ -1,0 +1,52 @@
+# Local single-container run of the Immitracker app.
+#
+# Docker Desktop lists this as a project you can start with one click. The
+# container and its volume are named and persistent, so stopping and starting it
+# keeps whatever dataset you uploaded.
+#
+#   first time:  docker compose up -d --build
+#   after that:  press Start in Docker Desktop, or `docker compose start`
+#
+# Secrets live in .env, which is gitignored. Copy .env.example to .env and fill
+# it in if you are setting this up on a new machine.
+
+services:
+  app:
+    build:
+      context: .
+    image: immitracker:local
+    container_name: immitracker
+
+    ports:
+      # Bound to loopback deliberately. Without the 127.0.0.1 prefix Docker
+      # publishes on every interface, which would put the app — and any case
+      # data uploaded into it — on the local network.
+      - "127.0.0.1:3001:3001"
+
+    env_file:
+      - .env
+
+    volumes:
+      # dataStore restores uploads from this directory at startup, so a named
+      # volume keeps a dataset registered across image rebuilds. Without it,
+      # every rebuild means re-uploading the export.
+      - immitracker-uploads:/app/server/uploads
+
+    # Reported as the green "healthy" badge in Docker Desktop. Uses node's
+    # built-in fetch because the slim runtime image has no curl or wget.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+    # No restart policy on purpose: the container stays stopped until you start
+    # it, rather than coming up every time Docker Desktop launches.
+
+volumes:
+  immitracker-uploads:

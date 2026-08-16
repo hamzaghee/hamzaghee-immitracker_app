@@ -9,11 +9,31 @@ web/dist
 server/uploads
 
 # Applicant data, in case a copy is sitting in the folder.
+#
+# Both forms of each pattern are needed: a bare pattern matches only at the
+# context root, so the **/ variant is what catches a copy sitting in a
+# subdirectory. An old project folder held a full export three levels down and
+# was being shipped to the daemon on every build.
 consolidated_eapr_active_cases.json
 *eapr*.json
 *Export*.json
 *export*.json
 Immitracker*.json
+**/consolidated_eapr_active_cases.json
+**/*eapr*.json
+**/*Export*.json
+**/*export*.json
+**/Immitracker*.json
+
+# Archived copies of the project kept around for cleanup. Nothing in the build
+# needs them, and they carry their own copies of everything above.
+_to_delete
+**/_to_delete
+
+# Aider working files
+.aider*
+**/.aider*
+.claude
 
 # Local tooling
 .vscode
