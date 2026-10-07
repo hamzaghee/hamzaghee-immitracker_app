@@ -99,11 +99,11 @@ export const fetchReportResult = (id) => get(`/api/reports/${id}/result`);
  * Downloads the report, posting the current section overrides so the file
  * matches what is on screen.
  */
-export async function downloadReport(id, format, overrides = {}, theme = 'light') {
+export async function downloadReport(id, format, overrides = {}) {
   const res = await fetch(`/api/reports/${id}/report.${format}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ overrides, theme }),
+    body: JSON.stringify({ overrides }),
   });
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;

@@ -229,10 +229,8 @@ export const jobResult = (job) => {
  * pasted replacement text — so a download matches what is on screen.
  * Shape: { hidden: [id], text: { id: 'replacement' } }
  *
- * `theme` is the palette the viewer had active, so an export looks like the
- * screen it came from.
  */
-export function renderJobHtml(job, overrides = {}, theme = 'light') {
+export function renderJobHtml(job, overrides = {}) {
   if (job.status !== 'complete') {
     throw Object.assign(new Error(`Report is ${job.status}.`), { status: 409 });
   }
@@ -248,7 +246,6 @@ export function renderJobHtml(job, overrides = {}, theme = 'light') {
     sections,
     config: job.config,
     notice: job.notice,
-    theme,
   });
 }
 

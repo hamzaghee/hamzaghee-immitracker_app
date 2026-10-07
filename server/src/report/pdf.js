@@ -137,7 +137,11 @@ async function renderOnce(html) {
       // numbering is print furniture and stays.
       displayHeaderFooter: true,
       headerTemplate: '<div></div>',
-      footerTemplate: `<div style="width:100%;font-size:8px;color:#898781;
+      // Ink 500, the design system's muted text step. Chromium renders the
+      // footer in its own context, which cannot reach the document's embedded
+      // @font-face, so this stays on a system sans rather than carrying another
+      // 30KB of Mulish on every page.
+      footerTemplate: `<div style="width:100%;font-size:8px;color:#6E7385;
         font-family:system-ui,sans-serif;padding:0 12mm;text-align:right">
         <span class="pageNumber"></span> / <span class="totalPages"></span>
       </div>`,

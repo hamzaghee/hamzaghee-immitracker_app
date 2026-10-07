@@ -20,6 +20,7 @@ import GroupedBarChart from './components/GroupedBarChart.jsx';
 import ChartCard from './components/ChartCard.jsx';
 import StatTile from './components/StatTile.jsx';
 import { streamColor, fmt } from './components/primitives.jsx';
+import logo from '@shared/brand/immitracker-logo.svg';
 
 const POLL_MS = 1500;
 
@@ -39,31 +40,6 @@ const toSortedNamed = (obj, names) =>
     .sort((a, b) => b[1] - a[1])
     .map(([code, value]) => ({ label: names?.[code] || code, value }));
 
-/**
- * Theme state plus the *resolved* mode.
- *
- * The setting can be 'auto', but an export has to commit to one palette — a
- * PDF has no viewer preference to follow — so 'auto' is resolved against the
- * OS preference at download time.
- */
-function useTheme() {
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'auto');
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'auto') root.removeAttribute('data-theme');
-    else root.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
-
-  const resolved = () => {
-    if (theme === 'dark' || theme === 'light') return theme;
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  };
-
-  return [theme, setTheme, resolved];
-}
-
 export default function App() {
   // phase: 'config' | 'progress' | 'report'
   const [phase, setPhase] = useState('config');
@@ -77,7 +53,6 @@ export default function App() {
   const [needsAuth, setNeedsAuth] = useState(false);
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(null);
-  const [theme, setTheme, resolvedTheme] = useTheme();
   const pollRef = useRef(null);
 
   const refreshDatasets = useCallback(async () => {
@@ -163,7 +138,7 @@ export default function App() {
     setDownloading(format);
     setError(null);
     try {
-      await downloadReport(job.id, format, overrides, resolvedTheme());
+      await downloadReport(job.id, format, overrides);
     } catch (e) {
       setError(`Download failed: ${e.message}`);
     } finally {
@@ -206,15 +181,10 @@ export default function App() {
 
   const header = (
     <header className="masthead">
-      <div>
+      <div className="brand">
+        <img className="brand-mark" src={logo} alt="Immitracker" />
         <h1>Express Entry Processing Insights</h1>
       </div>
-      <button
-        className="theme-toggle"
-        onClick={() => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'auto' : 'dark')}
-      >
-        Theme: {theme}
-      </button>
     </header>
   );
 
@@ -231,7 +201,7 @@ export default function App() {
             <strong>Could not reach the API.</strong>
           </p>
           <p>{error}</p>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          <p className="hint">
             Start it with <code>npm start</code> in the <code>server</code> folder.
           </p>
         </div>
@@ -309,7 +279,7 @@ export default function App() {
           ← New report
         </button>
         <div className="report-downloads">
-          <button className="primary" disabled={downloading} onClick={() => download('html')}>
+          <button className="secondary" disabled={downloading} onClick={() => download('html')}>
             {downloading === 'html' ? 'Preparing…' : 'Download as HTML'}
           </button>
           <button className="primary" disabled={downloading} onClick={() => download('pdf')}>

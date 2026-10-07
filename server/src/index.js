@@ -284,12 +284,9 @@ function overridesFrom(req) {
   return hidden ? { hidden: String(hidden).split(',').filter(Boolean) } : {};
 }
 
-/** Theme the viewer had active; anything but 'dark' renders light. */
-const themeFrom = (req) => ((req.body?.theme ?? req.query.theme) === 'dark' ? 'dark' : 'light');
-
 function sendHtml(req, res) {
   const job = getJob(req.params.id);
-  const html = renderJobHtml(job, overridesFrom(req), themeFrom(req));
+  const html = renderJobHtml(job, overridesFrom(req));
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${reportFilename(job)}.html"`);
   res.send(html);
@@ -297,7 +294,7 @@ function sendHtml(req, res) {
 
 async function sendPdf(req, res) {
   const job = getJob(req.params.id);
-  const html = renderJobHtml(job, overridesFrom(req), themeFrom(req));
+  const html = renderJobHtml(job, overridesFrom(req));
   const pdf = await htmlToPdf(html);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${reportFilename(job)}.pdf"`);

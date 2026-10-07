@@ -5,10 +5,13 @@
  * requests — so it opens offline from a Downloads folder. It is also exactly
  * what Puppeteer renders to PDF, so the two exports cannot disagree.
  *
- * Renders in light or dark to match the theme the user was viewing when they
- * pressed download. Colours are baked in rather than left to a media query:
- * a PDF has no viewer preference to respond to, and a file emailed onward
- * should look like the one that was exported.
+ * One palette, baked in rather than left to a media query: a PDF has no viewer
+ * preference to respond to, and a file emailed onward should look like the one
+ * that was exported.
+ *
+ * Typography and colour mirror web/src/theme.css. The two are separate
+ * stylesheets on purpose — this one has to survive with no external requests —
+ * so a change to one needs the same change to the other.
  *
  * Built section by section: the report content is still being revised, so each
  * block should be replaceable without touching the others.
@@ -17,6 +20,7 @@
 import { esc, fmt, PALETTE, STREAM_SLOT } from '../../../shared/chartGeometry.js';
 import { parseRichText, sectionTagLabel } from '../../../shared/text.js';
 import { hBar, lineChart, donut, groupedBar } from './charts.js';
+import { FONT_FACE, LOGO_SVG } from './assets.js';
 
 const sortedEntries = (obj) => Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
 
@@ -69,6 +73,7 @@ const legendOf = (items) => `
 
 const headerSection = (config) => `
   <header class="masthead">
+    <img class="brand-mark" src="${LOGO_SVG}" alt="Immitracker">
     <h1>${esc(config.programLabel || 'Express Entry')} Processing Insights</h1>
   </header>`;
 
@@ -128,7 +133,7 @@ function analysisSection(sections) {
   </div>`;
 }
 
-function chartsSection(s, config, P, mode) {
+function chartsSection(s, config, P) {
   const streamColor = (name) => P.series[STREAM_SLOT[name] ?? 0];
   const opts = { palette: P };
 
@@ -175,8 +180,8 @@ function chartsSection(s, config, P, mode) {
   ${card('Top 10 countries of residence', 'Where applicants were living when they applied', hBar(countries, { ...opts, gutter: 170 }))}
   ${card('Top 10 nationalities', 'Applicant nationality', hBar(nationalities, { ...opts, gutter: 170 }))}
   ${card('Average Submission → PPR by stream', 'Mean elapsed days, coloured by stream', hBar(streamAvg, { ...opts, gutter: 130, suffix: 'd' }))}
-  ${card('Monthly submissions', 'Cases by month of submission', lineChart(monthly, { ...opts, gradientId: `g-subs-${mode}` }))}
-  ${card('Monthly processing times', 'Average Submission → PPR by month of submission', lineChart(monthlyTimes, { ...opts, suffix: 'd', gradientId: `g-times-${mode}` }))}
+  ${card('Monthly submissions', 'Cases by month of submission', lineChart(monthly, { ...opts, gradientId: 'g-subs' }))}
+  ${card('Monthly processing times', 'Average Submission → PPR by month of submission', lineChart(monthlyTimes, { ...opts, suffix: 'd', gradientId: 'g-times' }))}
   ${card(
     'Comparison of min & max processing times',
     'Longest and shortest Submission → PPR per program, within the selected period',
@@ -193,43 +198,59 @@ function chartsSection(s, config, P, mode) {
 /* ---------------- document ---------------- */
 
 const styles = (P) => `
+  ${FONT_FACE}
   *{box-sizing:border-box}
   body{margin:0;background:${P.page};color:${P.textPrimary};
-    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.55;}
-  .wrap{max-width:1000px;margin:0 auto;padding:2rem 1.5rem 3rem}
-  .masthead{border-bottom:1px solid ${P.border};padding-bottom:1rem;margin-bottom:1.5rem}
-  h1{font-size:1.5rem;font-weight:650;margin:0;letter-spacing:-.01em}
-  h2{font-size:1.1rem;font-weight:640;margin:2rem 0 .85rem}
-  h3{font-size:.98rem;font-weight:620;margin:0}
-  h4{font-size:.92rem;font-weight:620;margin:0 0 .3rem}
-  .desc{font-size:.8rem;color:${P.textSecondary};margin:.15rem 0 .9rem}
-  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;margin-bottom:1.25rem}
+    font-family:'Mulish',system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:16px;line-height:24px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:32px 24px 48px}
+
+  .masthead{display:flex;align-items:center;gap:16px;
+    border-bottom:1px solid ${P.border};padding-bottom:24px;margin-bottom:24px}
+  .brand-mark{height:36px;width:auto;flex-shrink:0;display:block}
+
+  h1{font-size:28px;line-height:36px;font-weight:800;letter-spacing:-.01em;margin:0}
+  h2{font-size:18px;line-height:26px;font-weight:800;margin:32px 0 16px}
+  h3{font-size:16px;line-height:24px;font-weight:800;margin:0}
+  h4{font-size:18px;line-height:26px;font-weight:800;margin:0 0 8px}
+  .desc{font-size:13px;line-height:20px;color:${P.textSecondary};margin:4px 0 16px}
+
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin-bottom:24px}
   .tiles.six{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
-  .tile,.card{background:${P.surface};border:1px solid ${P.border};border-radius:10px}
-  .tile{padding:1rem 1.1rem}
-  .tile-label{font-size:.78rem;color:${P.textSecondary};font-weight:500}
-  .tile-value{font-size:1.75rem;font-weight:650;margin-top:.3rem;letter-spacing:-.02em;line-height:1.1}
-  .tile-value .unit{font-size:.9rem;font-weight:500;color:${P.textSecondary};margin-left:.25rem}
-  .tile-foot{font-size:.75rem;color:${P.textMuted};margin-top:.3rem}
-  .card{padding:1.1rem 1.2rem 1.2rem;margin-bottom:1.25rem}
-  .legend{display:flex;flex-wrap:wrap;gap:.5rem 1rem;margin-top:.9rem}
-  .li{display:flex;align-items:center;gap:.4rem;font-size:.8rem;color:${P.textSecondary}}
-  .sw{width:10px;height:10px;border-radius:2px;flex:0 0 auto}
-  .analysis{display:grid;gap:.85rem}
-  .an{background:${P.surface};border:1px solid ${P.border};border-left:3px solid ${P.series[0]};
-    border-radius:8px;padding:.9rem 1.1rem}
-  .an p{margin:0 0 .5rem;font-size:.9rem;color:${P.textSecondary}}
+  .tile,.card{background:${P.surface};border:1px solid ${P.border};border-radius:20px}
+  /* Flex column so a wrapped label takes the slack above the value, leaving
+     every number in a row on the same baseline. */
+  .tile{padding:24px;display:flex;flex-direction:column}
+  .tile-value{margin-top:auto}
+  .tile-label{font-size:13px;line-height:20px;color:${P.textSecondary};font-weight:800}
+  .tile-value{font-size:28px;line-height:36px;font-weight:800;letter-spacing:-.01em;
+    padding-top:4px;font-variant-numeric:tabular-nums}
+  .tile-value .unit{font-size:16px;font-weight:400;color:${P.textSecondary};margin-left:4px;letter-spacing:0}
+  .tile-foot{font-size:13px;line-height:20px;color:${P.textMuted};margin-top:4px}
+
+  .card{padding:24px;margin-bottom:24px}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:12px}
+  .li{display:flex;align-items:center;gap:8px;font-size:13px;line-height:20px;color:${P.textSecondary}}
+  .sw{width:10px;height:10px;border-radius:999px;flex:0 0 auto}
+
+  .analysis{display:grid;gap:12px}
+  .an{background:${P.surface};border:1px solid ${P.border};border-left:3px solid ${P.primary};
+    border-radius:14px;padding:16px 24px}
+  .an p{margin:0 0 8px;font-size:16px;line-height:24px;color:${P.textSecondary}}
   .an p:last-child{margin-bottom:0}
-  .an ul{margin:.2rem 0 .5rem;padding-left:1.1rem;font-size:.9rem;color:${P.textSecondary}}
+  .an ul{margin:4px 0 8px;padding-left:24px;font-size:16px;line-height:24px;color:${P.textSecondary}}
   .an ul:last-child{margin-bottom:0}
-  .an li{margin:.15rem 0}
-  .tag{font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;font-weight:650;
-    color:${P.textMuted};border:1px solid ${P.border};border-radius:4px;padding:.05rem .3rem;margin-left:.45rem;vertical-align:middle}
-  .empty{font-size:.85rem;color:${P.textMuted};margin:.5rem 0}
-  .note{font-size:.82rem;color:${P.textSecondary};background:${P.surface};
-    border:1px solid ${P.border};border-left:3px solid ${P.series[3]};border-radius:8px;padding:.75rem 1rem;margin-bottom:1.25rem}
+  .an li{margin:4px 0}
+  .tag{font-size:11px;line-height:16px;text-transform:uppercase;letter-spacing:.06em;font-weight:800;
+    color:${P.textSecondary};background:${P.page};border:1px solid ${P.border};border-radius:999px;
+    padding:4px 12px;margin-left:8px;vertical-align:middle}
+
+  .empty{font-size:13px;line-height:20px;color:${P.textSecondary};margin:8px 0}
+  .note{font-size:13px;line-height:20px;color:${P.textSecondary};background:${P.surface};
+    border:1px solid ${P.border};border-left:3px solid ${P.warning};border-radius:14px;
+    padding:16px;margin-bottom:24px}
+
   @media print{
-    /* Keep the chosen theme in print — a dark export should stay dark. */
     body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
     .wrap{max-width:none;padding:0}
     .card,.tile,.an{break-inside:avoid;page-break-inside:avoid}
@@ -242,19 +263,17 @@ const styles = (P) => `
  * @param {object[]} args.sections analysis sections, already filtered/overridden
  * @param {object} args.config    { programLabel, streamLabel, periodLabel, stream }
  * @param {string} [args.notice]  optional banner, e.g. AI analysis skipped
- * @param {'light'|'dark'} [args.theme]
  * @returns {string} a complete HTML document
  */
-export function renderReportHtml({ summary, sections = [], config = {}, notice = '', theme = 'light' }) {
-  const mode = theme === 'dark' ? 'dark' : 'light';
-  const P = PALETTE[mode];
+export function renderReportHtml({ summary, sections = [], config = {}, notice = '' }) {
+  const P = PALETTE;
 
   return `<!doctype html>
-<html lang="en" data-theme="${mode}">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="${mode}">
+<meta name="color-scheme" content="light">
 <title>${esc(config.programLabel || 'Express Entry')} Processing Insights</title>
 <style>${styles(P)}</style>
 </head>
@@ -266,7 +285,7 @@ ${tilesSection(summary)}
 ${milestonesSection(summary)}
 ${analysisSection(sections)}
 <h2>Charts</h2>
-${chartsSection(summary, config, P, mode)}
+${chartsSection(summary, config, P)}
 </div>
 </body>
 </html>`;

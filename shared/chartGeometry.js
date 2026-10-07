@@ -6,39 +6,86 @@
  * Vite can bundle it. It exists so the on-screen charts and the exported ones
  * cannot drift: same bar maths, same axis ticks, same colours.
  *
- * The categorical hexes were validated with a colourblind-safety checker in
- * both modes. Do not substitute values here without re-running that check —
- * the slot *ordering* is the CVD-safety mechanism, not decoration.
+ * Brand tokens come from the Immitracker design system v1.0; the categorical
+ * chart slots deliberately do not — see PALETTE.series.
  */
 
 /* ---------------- palette ---------------- */
 
+/**
+ * Brand tokens from the Immitracker design system v1.0.
+ *
+ * Two hues: red for advocacy, action and primary CTAs; blue for wayfinding and
+ * informational accents. Dark Blue is the default ink. Neutrals are the cool
+ * grays derived from it.
+ *
+ * Light only. The app had a dark column; it was removed because the design
+ * system specifies one palette and an export has to commit to it anyway.
+ */
+export const BRAND = {
+  // Primary - red
+  red100: '#FFD7CF',
+  red500: '#E7664C',
+  red700: '#BC513B',
+  // Accent - blue
+  blue100: '#BDD6FF',
+  blue500: '#2176FF',
+  // Neutrals, derived from Ink 900
+  ink900: '#2D3142',
+  ink700: '#4A4F62',
+  ink500: '#6E7385',
+  ink300: '#B6BAC6',
+  ink200: '#D9DCE3',
+  ink100: '#ECEEF2',
+  ink50: '#F5F6F9',
+  white: '#FFFFFF',
+};
+
+/**
+ * The palette the charts and report styles read.
+ *
+ * Primary fill is Dark Red (red700), not Med Red: white text on Med Red is
+ * 3.28:1 and fails WCAG AA, while Dark Red clears it at 4.80:1. Med Red is the
+ * hover step. Both are design-system values.
+ */
 export const PALETTE = {
-  light: {
-    surface: '#fcfcfb',
-    page: '#f9f9f7',
-    textPrimary: '#0b0b0b',
-    textSecondary: '#52514e',
-    textMuted: '#898781',
-    gridline: '#e1e0d9',
-    baseline: '#c3c2b7',
-    border: 'rgba(11,11,11,0.10)',
-    series: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'],
-    // Recessive fill for the non-selected programmes in the comparison chart.
-    muted: '#c3c2b7',
-  },
-  dark: {
-    surface: '#1a1a19',
-    page: '#0d0d0d',
-    textPrimary: '#ffffff',
-    textSecondary: '#c3c2b7',
-    textMuted: '#898781',
-    gridline: '#2c2c2a',
-    baseline: '#383835',
-    border: 'rgba(255,255,255,0.10)',
-    series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'],
-    muted: '#4a4a46',
-  },
+  surface: BRAND.white,
+  page: BRAND.ink50,
+  textPrimary: BRAND.ink900,
+  textSecondary: BRAND.ink700,
+  textMuted: BRAND.ink500,
+  gridline: BRAND.ink200,
+  baseline: BRAND.ink300,
+  border: BRAND.ink200,
+
+  primary: BRAND.red700,
+  primaryHover: BRAND.red500,
+  primaryTint: BRAND.red100,
+  accent: BRAND.blue500,
+  accentTint: BRAND.blue100,
+
+  /**
+   * Categorical chart slots, unchanged from the pre-brand palette and still
+   * colourblind-validated. The brand's two hues cannot carry five series --
+   * Med Blue against Med Red is 1.26:1, far below the 3:1 needed to tell two
+   * bars apart, and red/blue is the classic protan/deutan confusion pair. So
+   * the brand colours the frame and these colour the data.
+   *
+   * Do not substitute values here without re-running a CVD check: the slot
+   * *ordering* is the safety mechanism, not decoration.
+   */
+  series: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'],
+  // Recessive fill for the non-selected programmes in the comparison chart.
+  muted: BRAND.ink300,
+
+  /**
+   * Semantic status. The design system defines no success/warning/danger, so
+   * these are chosen to clear 4.5:1 on both white and Ink 50, and to stay
+   * clearly distinct from the primary red so an error never reads as a CTA.
+   */
+  good: '#13794A',
+  warning: '#946100',
+  critical: '#C0392B',
 };
 
 /**
@@ -53,8 +100,7 @@ export const STREAM_SLOT = {
   'PNP-Inland': 4,
 };
 
-export const streamColorHex = (name, mode = 'light') =>
-  PALETTE[mode].series[STREAM_SLOT[name] ?? 0];
+export const streamColorHex = (name) => PALETTE.series[STREAM_SLOT[name] ?? 0];
 
 /* ---------------- geometry ---------------- */
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { login } from '../api.js';
+import logo from '@shared/brand/immitracker-logo.svg';
 
 /**
  * Password screen for the production deployment.
@@ -31,6 +32,7 @@ export default function PasswordGate({ onAuthenticated }) {
   return (
     <div className="gate">
       <form className="gate-card" onSubmit={submit}>
+        <img className="gate-mark" src={logo} alt="Immitracker" />
         <h1>Express Entry Processing Insights</h1>
         <p className="hint">This instance is private. Enter the access password to continue.</p>
 

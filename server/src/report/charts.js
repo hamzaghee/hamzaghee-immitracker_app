@@ -21,7 +21,7 @@ const text = (P, x, y, s, anchor = 'middle', fill = P.textMuted, extra = '') =>
 /**
  * Horizontal bars. data: [{ label, value, color?, }]
  */
-export function hBar(data, { width = 620, gutter = 150, thickness = 18, gap = 10, suffix = '', palette = PALETTE.light } = {}) {
+export function hBar(data, { width = 620, gutter = 150, thickness = 18, gap = 10, suffix = '', palette = PALETTE } = {}) {
   const P = palette;
   if (!data.length) return `<p class="empty">No data for this selection.</p>`;
   const band = thickness + gap;
@@ -59,7 +59,7 @@ export function hBar(data, { width = 620, gutter = 150, thickness = 18, gap = 10
 }
 
 /** Single-series line over time. data: [{ label, value }] */
-export function lineChart(data, { width = 620, height = 210, suffix = '', palette = PALETTE.light, gradientId = 'lg' } = {}) {
+export function lineChart(data, { width = 620, height = 210, suffix = '', palette = PALETTE, gradientId = 'lg' } = {}) {
   const P = palette;
   if (!data.length) return `<p class="empty">No data for this selection.</p>`;
   const axisW = 46;
@@ -106,7 +106,7 @@ export function lineChart(data, { width = 620, height = 210, suffix = '', palett
 }
 
 /** Part-to-whole donut with a 2px surface gap between segments. */
-export function donut(data, { size = 200, thickness = 34, centerLabel = 'cases', palette = PALETTE.light } = {}) {
+export function donut(data, { size = 200, thickness = 34, centerLabel = 'cases', palette = PALETTE } = {}) {
   const P = palette;
   const total = data.reduce((s, d) => s + d.value, 0);
   if (!total) return `<p class="empty">No data for this selection.</p>`;
@@ -142,7 +142,7 @@ export function donut(data, { size = 200, thickness = 34, centerLabel = 'cases',
  * Grouped vertical bars — the longest/shortest comparison.
  * data: [{ label, values: [{ name, value, color }], highlighted }]
  */
-export function groupedBar(data, { width = 620, height = 240, suffix = 'd', palette = PALETTE.light } = {}) {
+export function groupedBar(data, { width = 620, height = 240, suffix = 'd', palette = PALETTE } = {}) {
   const P = palette;
   if (!data.length) return `<p class="empty">No data for this selection.</p>`;
   const axisW = 46;
