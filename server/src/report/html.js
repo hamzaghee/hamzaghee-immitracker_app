@@ -252,7 +252,9 @@ const styles = (P) => `
 
   @media print{
     body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    .wrap{max-width:none;padding:0}
+    /* The PDF is generated with zero page margins so the page background
+       reaches the paper edge; the page inset lives here instead. */
+    .wrap{max-width:none;padding:14mm 12mm 16mm}
     .card,.tile,.an{break-inside:avoid;page-break-inside:avoid}
     h2{break-after:avoid;page-break-after:avoid}
   }`;

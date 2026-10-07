@@ -132,19 +132,21 @@ async function renderOnce(html) {
       format: 'A4',
       printBackground: true,
       timeout: RENDER_TIMEOUT_MS,
-      margin: { top: '14mm', bottom: '16mm', left: '12mm', right: '12mm' },
-      // Page numbers only. The removed report footer was body content; page
-      // numbering is print furniture and stays.
-      displayHeaderFooter: true,
-      headerTemplate: '<div></div>',
-      // Ink 500, the design system's muted text step. Chromium renders the
-      // footer in its own context, which cannot reach the document's embedded
-      // @font-face, so this stays on a system sans rather than carrying another
-      // 30KB of Mulish on every page.
-      footerTemplate: `<div style="width:100%;font-size:8px;color:#6E7385;
-        font-family:system-ui,sans-serif;padding:0 12mm;text-align:right">
-        <span class="pageNumber"></span> / <span class="totalPages"></span>
-      </div>`,
+      // Zero margins on every side. A margin box sits outside the body, so the
+      // page background stops at its edge and the sheet frames the report in
+      // white. With no margin box the body fills the paper and the page grey
+      // reaches all four edges; the inset lives in the document's own print
+      // rule instead.
+      margin: { top: '0', bottom: '0', left: '0', right: '0' },
+      // No page numbers, and they cannot come back without the white strip.
+      // Chrome will only evaluate counter(page) inside a header/footer margin
+      // box, and it reserves a fixed ~4mm below that box which nothing can
+      // paint: height:100%, 100vh, a fixed height and extra padding were all
+      // measured and all left the strip, while position:fixed escaped the box
+      // and covered the whole page. counter(page) on a repeating fixed element
+      // in the body renders "0" on every page. So it is edge-to-edge grey or
+      // page numbers, not both.
+      displayHeaderFooter: false,
     });
     return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
   } finally {
