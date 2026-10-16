@@ -1,21 +1,33 @@
-# Local single-container run of the Immitracker app.
+# Local runs of the Immitracker app — the same image in both deployment modes.
 #
-# Docker Desktop lists this as a project you can start with one click. The
-# container and its volume are named and persistent, so stopping and starting it
-# keeps whatever dataset you uploaded.
+# Docker Desktop lists these under one project, each with its own Start button:
+#
+#   immitracker-prod   http://localhost:3001   password, starts empty, you upload
+#   immitracker-demo   http://localhost:3002   no password, synthetic data, read-only
 #
 #   first time:  docker compose up -d --build
 #   after that:  press Start in Docker Desktop, or `docker compose start`
+#   one only:    docker compose up -d prod     (or: demo)
 #
 # Secrets live in .env, which is gitignored. Copy .env.example to .env and fill
-# it in if you are setting this up on a new machine.
+# it in when setting this up on a new machine.
 
 services:
-  app:
+  # ---------------- production ----------------
+  # The operator's own instance: no data until you upload an export, and
+  # everything behind the password from .env.
+  prod:
     build:
       context: .
     image: immitracker:local
-    container_name: immitracker
+    container_name: immitracker-prod
+
+    env_file:
+      - .env
+    environment:
+      # Overrides whatever .env says, so this service cannot come up in the
+      # wrong mode if that file is edited.
+      APP_MODE: production
 
     ports:
       # Bound to loopback deliberately. Without the 127.0.0.1 prefix Docker
@@ -23,18 +35,14 @@ services:
       # data uploaded into it — on the local network.
       - "127.0.0.1:3001:3001"
 
-    env_file:
-      - .env
-
     volumes:
       # dataStore restores uploads from this directory at startup, so a named
       # volume keeps a dataset registered across image rebuilds. Without it,
       # every rebuild means re-uploading the export.
       - immitracker-uploads:/app/server/uploads
 
-    # Reported as the green "healthy" badge in Docker Desktop. Uses node's
-    # built-in fetch because the slim runtime image has no curl or wget.
-    healthcheck:
+    healthcheck: &healthcheck
+      # node's built-in fetch, because the slim runtime image has no curl.
       test:
         - CMD
         - node
@@ -45,8 +53,34 @@ services:
       start_period: 20s
       retries: 3
 
-    # No restart policy on purpose: the container stays stopped until you start
-    # it, rather than coming up every time Docker Desktop launches.
+    # No restart policy on purpose: containers stay stopped until started
+    # deliberately, rather than coming up whenever Docker Desktop launches.
+
+  # ---------------- demo ----------------
+  # The public showcase build: seeded with the synthetic sample dataset, uploads
+  # and deletion refused, no password. Nothing real is ever loaded here.
+  demo:
+    build:
+      context: .
+    image: immitracker:local
+    container_name: immitracker-demo
+
+    env_file:
+      - .env
+    environment:
+      APP_MODE: demo
+      # Demo mode bypasses auth entirely, so these are unused. Blanked anyway so
+      # a password never reaches a container that is meant to be open.
+      APP_PASSWORD: ""
+      SESSION_SECRET: ""
+
+    ports:
+      - "127.0.0.1:3002:3001"
+
+    # No volume: the sample dataset is baked into the image and uploads are
+    # refused, so there is nothing to persist.
+
+    healthcheck: *healthcheck
 
 volumes:
   immitracker-uploads:
