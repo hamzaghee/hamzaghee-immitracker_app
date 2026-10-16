@@ -28,6 +28,8 @@ services:
       # Overrides whatever .env says, so this service cannot come up in the
       # wrong mode if that file is edited.
       APP_MODE: production
+      # The demo's key is in .env too; keep it out of this container.
+      GOOGLE_API_KEY_DEMO: ""
 
     ports:
       # Bound to loopback deliberately. Without the 127.0.0.1 prefix Docker
@@ -73,6 +75,11 @@ services:
       # a password never reaches a container that is meant to be open.
       APP_PASSWORD: ""
       SESSION_SECRET: ""
+      # The demo bills to its own Google key, so public traffic never draws on
+      # the production quota. No fallback: if GOOGLE_API_KEY_DEMO is unset the
+      # demo runs without written commentary rather than borrowing prod's key.
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY_DEMO:-}
+      GOOGLE_API_KEY_DEMO: ""
 
     ports:
       - "127.0.0.1:3002:3001"

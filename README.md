@@ -91,6 +91,7 @@ workload.
 | `APP_MODE` | `demo` or `production` (default) |
 | `APP_PASSWORD`, `SESSION_SECRET` | required in production |
 | `GOOGLE_API_KEY` | Generative Language API key; without it the report still renders, minus the written commentary |
+| `GOOGLE_API_KEY_DEMO` | `docker compose` only: becomes the demo service's `GOOGLE_API_KEY`, so the demo never uses the production key. On other hosts, set the demo deployment's own `GOOGLE_API_KEY` instead |
 | `LLM_MODEL` | default `gemini-flash-lite-latest`; a `models/` prefix is accepted |
 | `LLM_FALLBACK_MODELS` | comma-separated models tried in order when the one before is overloaded; at most three; empty disables — see below |
 | `LLM_USE_SCHEMA=0` | escape hatch only; Gemma **requires** the schema — see below |
