@@ -63,29 +63,22 @@ export const crsRows = (bands) => (bands || []).map((b) => ({ label: b.label, va
 export function crsNotes(dist) {
   const g = dist?.general || {};
   const p = dist?.pnp || {};
-  const pnpScoring = !p.scored
-    ? ''
-    : p.belowNomination === p.scored
-    ? 'Every PNP score here is below 600, so none appear to include the 600 provincial nomination points.'
-    : p.belowNomination
+  const pnpScoring =
+    !p.scored || p.belowNomination === p.scored
+      ? ''
+      : p.belowNomination
     ? `PNP scores include the 600 provincial nomination points. ${fmt(p.belowNomination)} of ${fmt(
         p.scored
       )} report a score below 600, likely entered before nomination; scores are shown as reported.`
     : 'PNP scores include the 600 provincial nomination points.';
   return {
-    general: [
-      coverageNote(CRS_LEAD, g.scored, g.total, 'FSW and CEC cases'),
-      'Provincial nominees are shown separately; their scores include 600 nomination points.',
-    ]
-      .filter(Boolean)
-      .join(' '),
+    general: coverageNote(CRS_LEAD, g.scored, g.total, 'FSW and CEC cases'),
     pnp: [coverageNote(CRS_LEAD, p.scored, p.total, 'PNP cases'), pnpScoring].filter(Boolean).join(' '),
   };
 }
 
 /** Submission → PPR moved into the milestones row; this is its explanation. */
-export const END_TO_END_NOTE =
-  'The highlighted tile is end to end: the average across all completed cases, from submission to PPR. The other tiles each time a single step.';
+export const END_TO_END_NOTE = 'Total process';
 
 export const PROCESS_NOTE =
   'Cases by their current status. Refused can happen at any stage, so it sits outside the line. Status and PPR date are reported separately, so these counts can differ slightly from the Approved tile.';
