@@ -32,9 +32,6 @@ export function meanRows(map, names) {
     .map(([key, v]) => ({ label: names?.[key] || key, value: v.meanDays, count: v.count }));
 }
 
-/** Top NOC codes as chart rows. */
-export const nocRows = (list) => (list || []).map(({ code, count }) => ({ label: code, value: count }));
-
 /**
  * The caveat for an optional field: how many cases actually filled it in.
  * Empty when all of them did.
@@ -53,7 +50,6 @@ export function coverageNote(lead, specified, total, scope = 'cases') {
 }
 
 export const DRAW_CATEGORY_LEAD = 'Not all applicants specify draw category.';
-export const NOC_LEAD = 'Not all applicants specify a NOC code.';
 
 export const CRS_LEAD = 'Not all applicants report a CRS score.';
 

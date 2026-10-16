@@ -22,13 +22,11 @@ import { parseRichText, sectionTagLabel } from '../../../shared/text.js';
 import {
   shareRows,
   meanRows,
-  nocRows,
   crsRows,
   crsNotes,
   coverageNote,
   processStages,
   DRAW_CATEGORY_LEAD,
-  NOC_LEAD,
   END_TO_END_NOTE,
   PROCESS_NOTE,
 } from '../../../shared/reportData.js';
@@ -213,10 +211,9 @@ function chartsSection(s, config, P) {
 
   const caseBars = (arr) => arr.map((c) => ({ label: c.label || c.slug || c.caseId, value: c.days }));
 
-  // Draw category, NOC and nationality timings — shaped by shared/reportData.js
+  // Draw category and nationality timings — shaped by shared/reportData.js
   // exactly as the dashboard shapes them.
   const drawShare = shareRows(s.drawCategoryCounts, s.drawCategorySpecified);
-  const approvalShare = shareRows(s.approvalsByDrawCategory, s.approvalsDrawCategorySpecified);
   const drawTimes = meanRows(s.processingByDrawCategory);
   const drawTimesSpecified = drawTimes.reduce((n, d) => n + d.count, 0);
   const nationalityTimes = meanRows(s.processingByNationality, s.countryNames);
@@ -244,10 +241,8 @@ function chartsSection(s, config, P) {
   ${card('Top 10 nationalities', 'Applicant nationality', hBar(nationalities, { ...opts, gutter: 170 }))}
   ${card('Average Submission → PPR by stream', 'Mean elapsed days, coloured by stream', hBar(streamAvg, { ...opts, gutter: 130, suffix: 'd' }))}
   ${card('Cases by draw category', 'Percentage of cases in each Express Entry draw category', hBar(drawShare, { ...opts, gutter: 210, suffix: '%' }), '', coverageNote(DRAW_CATEGORY_LEAD, s.drawCategorySpecified, total))}
-  ${card('Share of approvals by draw category', 'How approved cases (reached PPR) split across draw categories', hBar(approvalShare, { ...opts, gutter: 210, suffix: '%' }), '', coverageNote(DRAW_CATEGORY_LEAD, s.approvalsDrawCategorySpecified, s.approvedCount, 'approved cases'))}
   ${card('Average processing time by draw category', 'Mean Submission → PPR of completed cases, busiest category first', hBar(drawTimes, { ...opts, gutter: 210, suffix: 'd' }), '', coverageNote(DRAW_CATEGORY_LEAD, drawTimesSpecified, s.daysSubmissionToPPR.count, 'completed cases'))}
   ${card('Average processing time by nationality', 'Mean Submission → PPR for the 10 nationalities with the most completed cases', hBar(nationalityTimes, { ...opts, gutter: 170, suffix: 'd' }))}
-  ${card('Top 10 NOC codes', 'Most frequent National Occupational Classification codes', hBar(nocRows(s.topNocCodes), { ...opts, gutter: 90 }), '', coverageNote(NOC_LEAD, s.nocSpecified, total))}
   ${crsCard('CRS score distribution — FSW & CEC', crs.general, 25, crsNote.general)}
   ${crsCard('CRS score distribution — PNP', crs.pnp, 50, crsNote.pnp)}
   ${card('Monthly submissions', 'Cases by month of submission', lineChart(monthly, { ...opts, gradientId: 'g-subs' }))}

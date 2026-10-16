@@ -25,12 +25,10 @@ import logo from '@shared/brand/immitracker-logo.svg';
 import {
   shareRows,
   meanRows,
-  nocRows,
   crsRows,
   crsNotes,
   coverageNote,
   DRAW_CATEGORY_LEAD,
-  NOC_LEAD,
   END_TO_END_NOTE,
 } from '@shared/reportData.js';
 
@@ -280,13 +278,6 @@ export default function App() {
 
   const drawShare = shareRows(s.drawCategoryCounts, s.drawCategorySpecified);
   const drawNote = coverageNote(DRAW_CATEGORY_LEAD, s.drawCategorySpecified, s.totalRecordsAnalyzed);
-  const approvalShare = shareRows(s.approvalsByDrawCategory, s.approvalsDrawCategorySpecified);
-  const approvalNote = coverageNote(
-    DRAW_CATEGORY_LEAD,
-    s.approvalsDrawCategorySpecified,
-    s.approvedCount,
-    'approved cases'
-  );
   const drawTimes = meanRows(s.processingByDrawCategory);
   const drawTimesSpecified = drawTimes.reduce((n, d) => n + d.count, 0);
   const drawTimesNote = coverageNote(
@@ -296,8 +287,6 @@ export default function App() {
     'completed cases'
   );
   const nationalityTimes = meanRows(s.processingByNationality, s.countryNames);
-  const nocs = nocRows(s.topNocCodes);
-  const nocNote = coverageNote(NOC_LEAD, s.nocSpecified, s.totalRecordsAnalyzed);
   const crs = s.crsDistribution || {};
   const crsGeneral = crsRows(crs.general?.bands);
   const crsPnp = crsRows(crs.pnp?.bands);
@@ -469,7 +458,7 @@ export default function App() {
         <BarChart data={streamAvg} gutter={130} valueSuffix="d" />
       </ChartCard>
 
-      <div className="grid two" style={{ marginTop: '1.25rem' }}>
+      <div className="grid" style={{ marginTop: '1.25rem' }}>
         <ChartCard
           title="Cases by draw category"
           desc="Percentage of cases in each Express Entry draw category"
@@ -479,20 +468,6 @@ export default function App() {
         >
           <BarChart
             data={withSub(drawShare, (d) => `${fmt(d.count)} cases`)}
-            gutter={190}
-            valueSuffix="%"
-          />
-        </ChartCard>
-
-        <ChartCard
-          title="Share of approvals by draw category"
-          desc="How approved cases (reached PPR) split across draw categories"
-          note={approvalNote}
-          columns={shareCols('Draw category')}
-          rows={approvalShare.map((d) => ({ ...d, key: d.label }))}
-        >
-          <BarChart
-            data={withSub(approvalShare, (d) => `${fmt(d.count)} approved cases`)}
             gutter={190}
             valueSuffix="%"
           />
@@ -527,19 +502,6 @@ export default function App() {
           />
         </ChartCard>
       </div>
-
-      <ChartCard
-        title="Top 10 NOC codes"
-        desc="Most frequent National Occupational Classification codes"
-        note={nocNote}
-        columns={[
-          { key: 'label', label: 'NOC code' },
-          { key: 'value', label: 'Cases', num: true },
-        ]}
-        rows={nocs.map((d) => ({ ...d, key: d.label }))}
-      >
-        <BarChart data={nocs} gutter={90} />
-      </ChartCard>
 
       {crsCards.length ? (
         <div className={crsCards.length > 1 ? 'grid two' : 'grid'} style={{ marginTop: '1.25rem' }}>
