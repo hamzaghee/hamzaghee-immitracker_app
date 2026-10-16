@@ -81,7 +81,7 @@ export function sectionTagLabel(source) {
 /**
  * Splits markdown-style `**bold**` into runs.
  *
- * The local model emits these markers whether or not it is asked to. The HTML
+ * The model emits these markers whether or not it is asked to. The HTML
  * export converted them; the React view did not, so the asterisks were visible
  * on screen but not in the download. Both now use this.
  *
@@ -99,7 +99,7 @@ const normaliseHeading = (s) =>
 /**
  * Parses a section body into renderable blocks.
  *
- * The local model returns markdown whatever the prompt says: it repeats the
+ * The model returns markdown whatever the prompt says: it repeats the
  * section heading as the first line and writes `-` / `*` bullet lists. Rendered
  * as raw text those markers are visible on screen and in the export, which is
  * the "code showing in the report" defect. Rather than printing the syntax, or

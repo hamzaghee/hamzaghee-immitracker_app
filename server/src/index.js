@@ -427,8 +427,9 @@ app.get('/api/cases', (req, res, next) => {
 /**
  * Analysis for an arbitrary slice, outside the report-job flow.
  *
- * The computed sections always come back; the generated ones only when Ollama
- * is reachable, with `generated.available` explaining why not.
+ * The computed sections always come back; the generated ones only when the
+ * Generative Language API call succeeds, with `generated.available` explaining
+ * why not.
  */
 app.get('/api/insights', costlyLimiters, async (req, res, next) => {
   try {

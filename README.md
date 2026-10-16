@@ -4,7 +4,7 @@ A Node backend and Vite/React frontend that replicate the
 `Immitracker - Express Entry_Local V.1.0` n8n workflow as a live application.
 
 The n8n workflow read a JSON export from disk, relabeled its opaque field ids,
-filtered to the last 18 months, aggregated it, asked a local LLM for prose, and
+filtered to the last 18 months, aggregated it, asked an LLM for prose, and
 wrote a static `dashboard.html`. Here the same pipeline runs as an HTTP API and
 the static HTML is replaced by a React dashboard that queries it.
 

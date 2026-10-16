@@ -1,9 +1,9 @@
 /**
  * Progress page.
  *
- * The AI step can run for minutes, so each pipeline stage reports its own
+ * The AI step is the slowest stage, so each pipeline stage reports its own
  * state. `skipped` is a first-class outcome, not a failure — the report still
- * generates when the local model is unavailable.
+ * generates when the language model is unavailable.
  */
 
 const ICONS = {
@@ -49,12 +49,7 @@ export default function ProgressView({ status, config, onCancel }) {
             </button>
           </div>
         </>
-      ) : (
-        <p className="hint">
-          The written analysis runs on a local model and can take a few minutes. Charts and figures
-          are already computed.
-        </p>
-      )}
+      ) : null}
     </div>
   );
 }
