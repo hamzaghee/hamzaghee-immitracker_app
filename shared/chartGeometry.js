@@ -63,6 +63,8 @@ export const PALETTE = {
   primaryTint: BRAND.red100,
   accent: BRAND.blue500,
   accentTint: BRAND.blue100,
+  // Blue 100 at 35% over white: the featured-tile surface. Not for text or marks.
+  accentWash: '#E8F1FF',
 
   /**
    * Categorical chart slots, unchanged from the pre-brand palette and still

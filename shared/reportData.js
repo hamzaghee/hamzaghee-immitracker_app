@@ -1,0 +1,85 @@
+/**
+ * Report datasets shared by the React dashboard and the exported report.
+ *
+ * The newer report blocks need more than a sort: percentages against a partial
+ * denominator, a coverage note, a process line. Shaping them once here keeps
+ * the on-screen figures and the downloaded ones from drifting apart.
+ */
+
+import { fmt } from './chartGeometry.js';
+
+const pct = (n, d) => (d ? Math.round((n / d) * 1000) / 10 : 0);
+
+/**
+ * { label: count } -> [{ label, count, value }] sorted by count, where `value`
+ * is the percentage of `denominator`.
+ */
+export function shareRows(counts, denominator) {
+  return Object.entries(counts || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, count]) => ({ label, count, value: pct(count, denominator) }));
+}
+
+/**
+ * { key: { meanDays, count } } -> [{ label, value, count }], busiest first.
+ *
+ * Sorted by sample size rather than by duration: a group with one completed
+ * case can have the most extreme mean, and ranking by mean would put it on top.
+ */
+export function meanRows(map, names) {
+  return Object.entries(map || {})
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([key, v]) => ({ label: names?.[key] || key, value: v.meanDays, count: v.count }));
+}
+
+/** Top NOC codes as chart rows. */
+export const nocRows = (list) => (list || []).map(({ code, count }) => ({ label: code, value: count }));
+
+/**
+ * The caveat for an optional field: how many cases actually filled it in.
+ * Empty when all of them did.
+ * @param {string} lead what is missing, e.g. "Not all applicants specify draw category."
+ * @param {number} specified cases with the field filled in
+ * @param {number} total cases in scope
+ * @param {string} [scope] noun for `total`, e.g. "approved cases"
+ */
+export function coverageNote(lead, specified, total, scope = 'cases') {
+  // Nothing to caveat when every case filled the field in (the demo data does).
+  if (specified >= total) return '';
+  return `${lead} Figures cover the ${fmt(specified)} of ${fmt(total)} ${scope} (${pct(
+    specified,
+    total
+  )}%) that did.`;
+}
+
+export const DRAW_CATEGORY_LEAD = 'Not all applicants specify draw category.';
+export const NOC_LEAD = 'Not all applicants specify a NOC code.';
+
+/** Submission → PPR moved into the milestones row; this is its explanation. */
+export const END_TO_END_NOTE =
+  'The highlighted tile is end to end: the average across all completed cases, from submission to PPR. The other tiles each time a single step.';
+
+export const PROCESS_NOTE =
+  'Cases by their current status. Refused can happen at any stage, so it sits outside the line. Status and PPR date are reported separately, so these counts can differ slightly from the Approved tile.';
+
+/** Stages that count as an outcome rather than a step still in progress. */
+const DONE = new Set(['PPR', 'Landed']);
+
+/**
+ * The process line: each stage with its count, share of the total, a relative
+ * size for the marker, and whether it is a finished state.
+ */
+export function processStages(s) {
+  const stages = s.stageCounts || [];
+  const total = s.totalRecordsAnalyzed || 0;
+  const refused = { status: 'Refused', label: 'Refused', count: s.refusalCount || 0 };
+  const max = Math.max(1, ...stages.map((x) => x.count), refused.count);
+  // Area, not diameter, tracks the count — so the radius goes with the root.
+  const size = (n) => Math.round(12 + 26 * Math.sqrt(n / max));
+  const shape = (x, tone) => ({ ...x, pct: pct(x.count, total), size: size(x.count), tone });
+  return {
+    stages: stages.map((x) => shape(x, DONE.has(x.status) ? 'done' : 'active')),
+    refused: shape(refused, 'refused'),
+    other: s.otherStatusCount || 0,
+  };
+}

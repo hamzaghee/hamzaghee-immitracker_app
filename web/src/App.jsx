@@ -19,8 +19,18 @@ import DonutChart from './components/DonutChart.jsx';
 import GroupedBarChart from './components/GroupedBarChart.jsx';
 import ChartCard from './components/ChartCard.jsx';
 import StatTile from './components/StatTile.jsx';
+import ProcessLine from './components/ProcessLine.jsx';
 import { streamColor, fmt } from './components/primitives.jsx';
 import logo from '@shared/brand/immitracker-logo.svg';
+import {
+  shareRows,
+  meanRows,
+  nocRows,
+  coverageNote,
+  DRAW_CATEGORY_LEAD,
+  NOC_LEAD,
+  END_TO_END_NOTE,
+} from '@shared/reportData.js';
 
 const POLL_MS = 1500;
 
@@ -264,6 +274,41 @@ export default function App() {
     ['Medicals → PPR', s.daysMedsToPPR],
   ];
 
+  const pctOf = (n) => `${((n / (s.totalRecordsAnalyzed || 1)) * 100).toFixed(1)}% of cases`;
+
+  const drawShare = shareRows(s.drawCategoryCounts, s.drawCategorySpecified);
+  const drawNote = coverageNote(DRAW_CATEGORY_LEAD, s.drawCategorySpecified, s.totalRecordsAnalyzed);
+  const approvalShare = shareRows(s.approvalsByDrawCategory, s.approvalsDrawCategorySpecified);
+  const approvalNote = coverageNote(
+    DRAW_CATEGORY_LEAD,
+    s.approvalsDrawCategorySpecified,
+    s.approvedCount,
+    'approved cases'
+  );
+  const drawTimes = meanRows(s.processingByDrawCategory);
+  const drawTimesSpecified = drawTimes.reduce((n, d) => n + d.count, 0);
+  const drawTimesNote = coverageNote(
+    DRAW_CATEGORY_LEAD,
+    drawTimesSpecified,
+    s.daysSubmissionToPPR.count,
+    'completed cases'
+  );
+  const nationalityTimes = meanRows(s.processingByNationality, s.countryNames);
+  const nocs = nocRows(s.topNocCodes);
+  const nocNote = coverageNote(NOC_LEAD, s.nocSpecified, s.totalRecordsAnalyzed);
+
+  const shareCols = (label) => [
+    { key: 'label', label },
+    { key: 'count', label: 'Cases', num: true },
+    { key: 'value', label: '%', num: true },
+  ];
+  const meanCols = (label) => [
+    { key: 'label', label },
+    { key: 'value', label: 'Avg days', num: true },
+    { key: 'count', label: 'Cases', num: true },
+  ];
+  const withSub = (rows, sub) => rows.map((d) => ({ ...d, sub: sub(d) }));
+
   const monthlySubs = Object.entries(s.monthlySubmissions).map(([label, value]) => ({ label, value }));
   const monthlyTimes = Object.entries(s.monthlyProcessingTimes).map(([label, v]) => ({
     label,
@@ -298,21 +343,19 @@ export default function App() {
           value={s.approvedCount}
           foot="Cases that have reached PPR status"
         />
-        <StatTile
-          label="Refused"
-          value={s.refusalCount}
-          foot={`${((s.refusalCount / (s.totalRecordsAnalyzed || 1)) * 100).toFixed(1)}% of cases`}
-        />
-        <StatTile
-          label="Submission → PPR"
-          value={s.daysSubmissionToPPR.mean}
-          unit="days"
-          foot={`Total cases: ${fmt(s.daysSubmissionToPPR.count)}`}
-        />
+        <StatTile label="In Progress" value={s.inProgressCount} foot={pctOf(s.inProgressCount)} />
+        <StatTile label="Refused" value={s.refusalCount} foot={pctOf(s.refusalCount)} />
       </div>
 
       <h2 className="section-title">Processing Milestones</h2>
-      <div className="tile-row">
+      <div className="milestone-grid">
+        <StatTile
+          featured
+          label="Submission → PPR"
+          value={s.daysSubmissionToPPR.mean}
+          unit="days"
+          foot={`Average of all completed cases · ${fmt(s.daysSubmissionToPPR.count)} cases`}
+        />
         {milestones.map(([label, st]) => (
           <StatTile
             key={label}
@@ -323,6 +366,12 @@ export default function App() {
           />
         ))}
       </div>
+      <p className="tile-note">
+        <span className="tile-note-swatch" aria-hidden="true" />
+        {END_TO_END_NOTE}
+      </p>
+
+      <ProcessLine summary={s} />
 
       <AnalysisSections sections={result.sections} overrides={overrides} onChange={setOverrides} />
 
@@ -391,6 +440,78 @@ export default function App() {
         rows={streamAvg.map((d) => ({ ...d, key: d.label }))}
       >
         <BarChart data={streamAvg} gutter={130} valueSuffix="d" />
+      </ChartCard>
+
+      <div className="grid two" style={{ marginTop: '1.25rem' }}>
+        <ChartCard
+          title="Cases by draw category"
+          desc="Percentage of cases in each Express Entry draw category"
+          note={drawNote}
+          columns={shareCols('Draw category')}
+          rows={drawShare.map((d) => ({ ...d, key: d.label }))}
+        >
+          <BarChart
+            data={withSub(drawShare, (d) => `${fmt(d.count)} cases`)}
+            gutter={190}
+            valueSuffix="%"
+          />
+        </ChartCard>
+
+        <ChartCard
+          title="Share of approvals by draw category"
+          desc="How approved cases (reached PPR) split across draw categories"
+          note={approvalNote}
+          columns={shareCols('Draw category')}
+          rows={approvalShare.map((d) => ({ ...d, key: d.label }))}
+        >
+          <BarChart
+            data={withSub(approvalShare, (d) => `${fmt(d.count)} approved cases`)}
+            gutter={190}
+            valueSuffix="%"
+          />
+        </ChartCard>
+      </div>
+
+      <div className="grid two">
+        <ChartCard
+          title="Average processing time by draw category"
+          desc="Mean Submission → PPR of completed cases, busiest category first"
+          note={drawTimesNote}
+          columns={meanCols('Draw category')}
+          rows={drawTimes.map((d) => ({ ...d, key: d.label }))}
+        >
+          <BarChart
+            data={withSub(drawTimes, (d) => `${fmt(d.count)} completed cases`)}
+            gutter={190}
+            valueSuffix="d"
+          />
+        </ChartCard>
+
+        <ChartCard
+          title="Average processing time by nationality"
+          desc="Mean Submission → PPR for the 10 nationalities with the most completed cases"
+          columns={meanCols('Nationality')}
+          rows={nationalityTimes.map((d) => ({ ...d, key: d.label }))}
+        >
+          <BarChart
+            data={withSub(nationalityTimes, (d) => `${fmt(d.count)} completed cases`)}
+            gutter={170}
+            valueSuffix="d"
+          />
+        </ChartCard>
+      </div>
+
+      <ChartCard
+        title="Top 10 NOC codes"
+        desc="Most frequent National Occupational Classification codes"
+        note={nocNote}
+        columns={[
+          { key: 'label', label: 'NOC code' },
+          { key: 'value', label: 'Cases', num: true },
+        ]}
+        rows={nocs.map((d) => ({ ...d, key: d.label }))}
+      >
+        <BarChart data={nocs} gutter={90} />
       </ChartCard>
 
       <div className="grid two" style={{ marginTop: '1.25rem' }}>

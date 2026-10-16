@@ -40,6 +40,46 @@ function spanDays(row, startField, endField) {
   return d < 0 ? null : d;
 }
 
+const DRAW_FIELD = 'EE Draw Category';
+
+/**
+ * The process line, in order. Refused sits outside it — it can happen at any
+ * point — and is reported separately.
+ */
+export const PROCESS_STAGES = [
+  { status: 'Submitted', label: 'Submitted' },
+  { status: 'e-APR AOR', label: 'AOR' },
+  { status: 'Biometrics', label: 'Biometrics' },
+  { status: 'Medicals Passed', label: 'Medicals passed' },
+  { status: 'Background Check', label: 'Background check' },
+  { status: 'Decision Made', label: 'Decision made' },
+  { status: 'PPR', label: 'PPR' },
+  { status: 'Landed', label: 'Landed' },
+];
+
+const sumValues = (obj) => Object.values(obj).reduce((s, v) => s + v, 0);
+
+/**
+ * Mean Submission→PPR per group, over completed cases only.
+ * @returns {{ [group: string]: { meanDays: number, count: number } }}
+ */
+function meanDaysBy(records, keyOf) {
+  const acc = {};
+  for (const r of records) {
+    const key = keyOf(r);
+    const days = parseFloat(r['Days from Submission to PPR']);
+    if (key === undefined || key === null || key === '' || isNaN(days)) continue;
+    (acc[key] ||= { sum: 0, count: 0 }).sum += days;
+    acc[key].count += 1;
+  }
+  return Object.fromEntries(
+    Object.entries(acc).map(([k, v]) => [
+      k,
+      { meanDays: Math.round((v.sum / v.count) * 10) / 10, count: v.count },
+    ])
+  );
+}
+
 /** Mean / median / count over an array of numbers, matching calculateStats(). */
 function statsOf(nums) {
   const n = nums.filter((x) => typeof x === 'number' && isFinite(x));
@@ -242,6 +282,40 @@ export function analyze(records, { comparisonRecords = records } = {}) {
   const slowestCases = [...casesWithDays].sort((a, b) => b.days - a.days).slice(0, 5);
   const quickestCases = [...casesWithDays].sort((a, b) => a.days - b.days).slice(0, 5);
 
+  // Draw category and NOC are optional fields — many applicants leave them
+  // blank — so each comes with the number of cases that filled it in, and the
+  // report states its percentages against that rather than the full total.
+  const drawCategoryCounts = countBy(records, DRAW_FIELD);
+  const drawCategorySpecified = sumValues(drawCategoryCounts);
+  const nocCounts = countBy(records, 'NOC Code');
+
+  // Of the approved (PPR-dated) cases, how they split across draw categories.
+  const approvedRecords = records.filter((r) => parseLooseDate(r[PPR_FIELD]));
+  const approvalsByDrawCategory = countBy(approvedRecords, DRAW_FIELD);
+
+  const processingByDrawCategory = meanDaysBy(records, (r) => r[DRAW_FIELD]);
+  // Nationality has a long tail of one-case countries; keep the ten with the
+  // most completed cases so each average rests on a real sample.
+  const processingByNationality = Object.fromEntries(
+    Object.entries(meanDaysBy(records, (r) => r['Nationality']))
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 10)
+  );
+
+  // Cases sitting at each step of the process right now, in process order.
+  // Statuses outside the known sequence are kept rather than dropped, so the
+  // counts always add up to the total.
+  const stageCounts = PROCESS_STAGES.map(({ status, label }) => ({
+    status,
+    label,
+    count: statusBreakdown[status] || 0,
+  }));
+  const knownStatuses = new Set([...PROCESS_STAGES.map((s) => s.status), 'Refused']);
+  const otherStatusCount = Object.entries(statusBreakdown)
+    .filter(([k]) => !knownStatuses.has(k))
+    .reduce((sum, [, v]) => sum + v, 0);
+  const unknownStatusCount = records.filter((r) => !r['Current Status']).length;
+
   const refusalCount = statusBreakdown['Refused'] || 0;
   const landedCount = statusBreakdown['Landed'] || 0;
   const pprCount = statusBreakdown['PPR'] || 0;
@@ -287,7 +361,7 @@ export function analyze(records, { comparisonRecords = records } = {}) {
      * Display names ride alongside so charts, tables, the export and the AI
      * fact sheet can all resolve them without breaking that comparison.
      */
-    countryNames: countryNameMap(topCountries, topNationalities),
+    countryNames: countryNameMap(topCountries, topNationalities, processingByNationality),
     monthlyProcessingTimes,
     slowestMonth,
     fastestMonth,
@@ -295,5 +369,27 @@ export function analyze(records, { comparisonRecords = records } = {}) {
     // can caveat the figure rather than presenting it as unconditional.
     monthSampleFloor,
     streamComparison,
+
+    /* ---- added for the V.0.4 report revisions ---- */
+
+    // Neither approved nor refused. Defined as the remainder so the three
+    // headline tiles always add up to Cases Submitted.
+    inProgressCount: Math.max(0, totalRecords - approvedCount - refusalCount),
+    drawCategoryCounts,
+    drawCategorySpecified,
+    approvalsByDrawCategory,
+    approvalsDrawCategorySpecified: sumValues(approvalsByDrawCategory),
+    processingByDrawCategory,
+    processingByNationality,
+    // An array, not a map: NOC codes are integer-like strings, and JS orders
+    // integer keys numerically, which would undo the frequency sort.
+    topNocCodes: Object.entries(nocCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([code, count]) => ({ code, count })),
+    nocSpecified: sumValues(nocCounts),
+    stageCounts,
+    // Cases with a status outside the process line, or none at all.
+    otherStatusCount: otherStatusCount + unknownStatusCount,
   };
 }

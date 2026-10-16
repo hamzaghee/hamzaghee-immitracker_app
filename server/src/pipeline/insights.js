@@ -158,6 +158,7 @@ function factSheet(s, config) {
     casesSubmitted: s.totalRecordsAnalyzed,
     approvedReachedPPR: s.approvedCount,
     refused: s.refusalCount,
+    inProgress: s.inProgressCount,
     landed: s.landedCount,
     atPPR: s.pprCount,
     decisionMade: s.decisionMadeCount,
@@ -179,6 +180,12 @@ function factSheet(s, config) {
     slowestMonth: s.slowestMonth,
     fastestMonth: s.fastestMonth,
     streamComparisonDays: s.streamComparison,
+    // Optional field: only `casesSpecifying` of the cases filled it in.
+    drawCategories: {
+      casesSpecifying: s.drawCategorySpecified,
+      counts: s.drawCategoryCounts,
+      submissionToPPRMeanDays: s.processingByDrawCategory,
+    },
   };
 }
 

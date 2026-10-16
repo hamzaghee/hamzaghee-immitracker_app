@@ -19,6 +19,17 @@
 
 import { esc, fmt, PALETTE, STREAM_SLOT } from '../../../shared/chartGeometry.js';
 import { parseRichText, sectionTagLabel } from '../../../shared/text.js';
+import {
+  shareRows,
+  meanRows,
+  nocRows,
+  coverageNote,
+  processStages,
+  DRAW_CATEGORY_LEAD,
+  NOC_LEAD,
+  END_TO_END_NOTE,
+  PROCESS_NOTE,
+} from '../../../shared/reportData.js';
 import { hBar, lineChart, donut, groupedBar } from './charts.js';
 import { FONT_FACE, LOGO_SVG } from './assets.js';
 
@@ -49,19 +60,20 @@ const richText = (s, title) =>
 
 /* ---------------- building blocks ---------------- */
 
-const tile = ({ label, value, unit, foot }) => `
-  <div class="tile">
+const tile = ({ label, value, unit, foot, featured = false }) => `
+  <div class="tile${featured ? ' featured' : ''}">
     <div class="tile-label">${esc(label)}</div>
     <div class="tile-value">${fmt(value)}${unit ? `<span class="unit">${esc(unit)}</span>` : ''}</div>
     ${foot ? `<div class="tile-foot">${esc(foot)}</div>` : ''}
   </div>`;
 
-const card = (title, desc, body, legend = '') => `
+const card = (title, desc, body, legend = '', note = '') => `
   <section class="card">
     <h3>${esc(title)}</h3>
     ${desc ? `<p class="desc">${esc(desc)}</p>` : ''}
     ${body}
     ${legend}
+    ${note ? `<p class="card-note">${esc(note)}</p>` : ''}
   </section>`;
 
 const legendOf = (items) => `
@@ -78,19 +90,13 @@ const headerSection = (config) => `
   </header>`;
 
 function tilesSection(s) {
-  const pct = s.totalRecordsAnalyzed
-    ? ((s.refusalCount / s.totalRecordsAnalyzed) * 100).toFixed(1)
-    : '0.0';
+  const pctOf = (n) =>
+    `${(s.totalRecordsAnalyzed ? (n / s.totalRecordsAnalyzed) * 100 : 0).toFixed(1)}% of cases`;
   return `<div class="tiles">
     ${tile({ label: 'Cases Submitted', value: s.totalRecordsAnalyzed, foot: 'In the selected period' })}
     ${tile({ label: 'Approved', value: s.approvedCount, foot: 'Cases that have reached PPR status' })}
-    ${tile({ label: 'Refused', value: s.refusalCount, foot: `${pct}% of cases` })}
-    ${tile({
-      label: 'Submission → PPR',
-      value: s.daysSubmissionToPPR.mean,
-      unit: 'days',
-      foot: `Total cases: ${fmt(s.daysSubmissionToPPR.count)}`,
-    })}
+    ${tile({ label: 'In Progress', value: s.inProgressCount, foot: pctOf(s.inProgressCount) })}
+    ${tile({ label: 'Refused', value: s.refusalCount, foot: pctOf(s.refusalCount) })}
   </div>`;
 }
 
@@ -105,13 +111,44 @@ function milestonesSection(s) {
     ['Medicals → PPR', s.daysMedsToPPR],
   ];
   return `<h2>Processing Milestones</h2>
-  <div class="tiles six">
+  <div class="milestones">
+    ${tile({
+      featured: true,
+      label: 'Submission → PPR',
+      value: s.daysSubmissionToPPR.mean,
+      unit: 'days',
+      foot: `Average of all completed cases · ${fmt(s.daysSubmissionToPPR.count)} cases`,
+    })}
     ${rows
       .map(([label, st]) =>
         tile({ label, value: st.mean, unit: 'days', foot: `Total cases: ${fmt(st.count)}` })
       )
       .join('')}
-  </div>`;
+  </div>
+  <p class="tile-note"><span class="tile-note-swatch"></span>${esc(END_TO_END_NOTE)}</p>
+  ${processSection(s)}`;
+}
+
+/** Same structure as web/src/components/ProcessLine.jsx. */
+function processSection(s) {
+  const { stages, refused, other } = processStages(s);
+  if (!stages.length) return '';
+  const stage = (st, tag = 'li', cls = 'stage') => `
+    <${tag} class="${cls} tone-${st.tone}">
+      <span class="stage-track"><span class="stage-dot" style="width:${st.size}px;height:${st.size}px"></span></span>
+      <span class="stage-count">${fmt(st.count)}</span>
+      <span class="stage-label">${esc(st.label)}</span>
+      <span class="stage-pct">${st.pct}%</span>
+    </${tag}>`;
+  const otherNote = other ? ` ${fmt(other)} cases have another or no status and are not shown.` : '';
+  return `<section class="card">
+    <h3>Where applications are now</h3>
+    <div class="process">
+      <ol class="process-line">${stages.map((st) => stage(st)).join('')}</ol>
+      ${stage(refused, 'div', 'stage process-aside')}
+    </div>
+    <p class="card-note">${esc(PROCESS_NOTE + otherNote)}</p>
+  </section>`;
 }
 
 function analysisSection(sections) {
@@ -174,12 +211,26 @@ function chartsSection(s, config, P) {
 
   const caseBars = (arr) => arr.map((c) => ({ label: c.label || c.slug || c.caseId, value: c.days }));
 
+  // Draw category, NOC and nationality timings — shaped by shared/reportData.js
+  // exactly as the dashboard shapes them.
+  const drawShare = shareRows(s.drawCategoryCounts, s.drawCategorySpecified);
+  const approvalShare = shareRows(s.approvalsByDrawCategory, s.approvalsDrawCategorySpecified);
+  const drawTimes = meanRows(s.processingByDrawCategory);
+  const drawTimesSpecified = drawTimes.reduce((n, d) => n + d.count, 0);
+  const nationalityTimes = meanRows(s.processingByNationality, s.countryNames);
+  const total = s.totalRecordsAnalyzed;
+
   return `
   ${card('Stream breakdown', 'Share of cases by program category', donut(streams, opts), legendOf(streams.map((d) => ({ label: `${d.label} — ${fmt(d.value)}`, color: d.color }))))}
   ${card('Application status', 'Where cases currently sit in the pipeline', hBar(statuses, { ...opts, gutter: 150 }))}
   ${card('Top 10 countries of residence', 'Where applicants were living when they applied', hBar(countries, { ...opts, gutter: 170 }))}
   ${card('Top 10 nationalities', 'Applicant nationality', hBar(nationalities, { ...opts, gutter: 170 }))}
   ${card('Average Submission → PPR by stream', 'Mean elapsed days, coloured by stream', hBar(streamAvg, { ...opts, gutter: 130, suffix: 'd' }))}
+  ${card('Cases by draw category', 'Percentage of cases in each Express Entry draw category', hBar(drawShare, { ...opts, gutter: 210, suffix: '%' }), '', coverageNote(DRAW_CATEGORY_LEAD, s.drawCategorySpecified, total))}
+  ${card('Share of approvals by draw category', 'How approved cases (reached PPR) split across draw categories', hBar(approvalShare, { ...opts, gutter: 210, suffix: '%' }), '', coverageNote(DRAW_CATEGORY_LEAD, s.approvalsDrawCategorySpecified, s.approvedCount, 'approved cases'))}
+  ${card('Average processing time by draw category', 'Mean Submission → PPR of completed cases, busiest category first', hBar(drawTimes, { ...opts, gutter: 210, suffix: 'd' }), '', coverageNote(DRAW_CATEGORY_LEAD, drawTimesSpecified, s.daysSubmissionToPPR.count, 'completed cases'))}
+  ${card('Average processing time by nationality', 'Mean Submission → PPR for the 10 nationalities with the most completed cases', hBar(nationalityTimes, { ...opts, gutter: 170, suffix: 'd' }))}
+  ${card('Top 10 NOC codes', 'Most frequent National Occupational Classification codes', hBar(nocRows(s.topNocCodes), { ...opts, gutter: 90 }), '', coverageNote(NOC_LEAD, s.nocSpecified, total))}
   ${card('Monthly submissions', 'Cases by month of submission', lineChart(monthly, { ...opts, gradientId: 'g-subs' }))}
   ${card('Monthly processing times', 'Average Submission → PPR by month of submission', lineChart(monthlyTimes, { ...opts, suffix: 'd', gradientId: 'g-times' }))}
   ${card(
@@ -216,7 +267,29 @@ const styles = (P) => `
   .desc{font-size:13px;line-height:20px;color:${P.textSecondary};margin:4px 0 16px}
 
   .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin-bottom:24px}
-  .tiles.six{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+  .milestones{display:grid;grid-template-columns:minmax(180px,1.15fr) repeat(3,minmax(0,1fr));gap:16px}
+  .milestones .featured{grid-row:span 2}
+  .tile.featured{background:${P.accentWash};border-color:${P.accent}}
+  .tile-note{display:flex;align-items:flex-start;gap:8px;font-size:13px;line-height:20px;
+    color:${P.textSecondary};margin:12px 0 24px}
+  .tile-note-swatch{flex:0 0 auto;width:12px;height:12px;margin-top:4px;border-radius:3px;
+    background:${P.accentWash};border:1px solid ${P.accent}}
+  .card-note{font-size:13px;line-height:20px;color:${P.textMuted};margin:16px 0 0}
+
+  .process{display:flex;align-items:flex-start;gap:16px;margin-top:16px}
+  .process-line{flex:1;display:flex;list-style:none;margin:0;padding:0}
+  .stage{flex:1 1 0;min-width:0;position:relative;display:flex;flex-direction:column;
+    align-items:center;text-align:center}
+  .process-line .stage+.stage::before{content:'';position:absolute;top:22px;right:50%;
+    width:100%;height:2px;background:${P.baseline}}
+  .stage-track{position:relative;z-index:1;height:44px;display:flex;align-items:center;justify-content:center}
+  .stage-dot{display:block;border-radius:999px;background:${P.accent};box-shadow:0 0 0 3px ${P.surface}}
+  .tone-done .stage-dot{background:${P.good}}
+  .tone-refused .stage-dot{background:${P.critical}}
+  .stage-count{font-size:18px;line-height:26px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:8px}
+  .stage-label{font-size:12px;line-height:16px;font-weight:800;color:${P.textSecondary};padding:0 2px}
+  .stage-pct{font-size:12px;line-height:18px;color:${P.textMuted}}
+  .process-aside{flex:0 0 84px;border-left:1px dashed ${P.baseline};padding-left:12px}
   .tile,.card{background:${P.surface};border:1px solid ${P.border};border-radius:20px}
   /* Flex column so a wrapped label takes the slack above the value, leaving
      every number in a row on the same baseline. */

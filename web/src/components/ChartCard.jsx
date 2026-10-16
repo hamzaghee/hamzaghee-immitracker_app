@@ -6,7 +6,7 @@ import { fmt } from './primitives.jsx';
  * optional polish: three light-mode series colours sit below 3:1 contrast, and
  * the relief rule requires a WCAG-clean way to read the same values.
  */
-export default function ChartCard({ title, desc, columns, rows, legend, children }) {
+export default function ChartCard({ title, desc, note, columns, rows, legend, children }) {
   const [view, setView] = useState('chart');
 
   return (
@@ -68,6 +68,8 @@ export default function ChartCard({ title, desc, columns, rows, legend, children
           </table>
         </div>
       )}
+      {/* Shown in both views: it qualifies the figures, not the drawing. */}
+      {note ? <p className="card-note">{note}</p> : null}
     </section>
   );
 }

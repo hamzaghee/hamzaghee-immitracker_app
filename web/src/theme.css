@@ -71,6 +71,8 @@
   --primary-tint: var(--red-100);
   --accent: var(--blue-500);
   --accent-tint: var(--blue-100);
+  /* Blue 100 at 35% over white — a surface tint, too pale for text or marks. */
+  --accent-wash: #e8f1ff;
 
   /* The design system defines no status palette. These clear 4.5:1 on both
      white and Ink 50, and stay distinct from the primary red so an error never
@@ -467,6 +469,144 @@ body {
   line-height: var(--body-m-line);
   color: var(--text-muted);
   margin-top: var(--s-1);
+}
+
+/* The one tile measured differently from its row: end to end rather than a
+   single step. Colour flags it; the note under the row explains it. */
+.tile.featured {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+}
+
+.milestone-grid {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.15fr) repeat(3, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+
+.milestone-grid .featured {
+  grid-row: span 2;
+}
+
+.tile-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  font-size: var(--body-m-size);
+  line-height: var(--body-m-line);
+  color: var(--text-secondary);
+  margin: var(--s-3) 0 var(--s-5);
+}
+
+.tile-note-swatch {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  border-radius: 3px;
+  background: var(--accent-wash);
+  border: 1px solid var(--accent);
+}
+
+/* ---------- process line ---------- */
+
+.process {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-4);
+  margin-top: var(--s-4);
+}
+
+.process-line {
+  flex: 1;
+  display: flex;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stage {
+  flex: 1 1 0;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* Connector from the previous stage's marker to this one, behind both. */
+.process-line .stage + .stage::before {
+  content: '';
+  position: absolute;
+  top: 22px;
+  right: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--baseline);
+}
+
+.stage-track {
+  position: relative;
+  z-index: 1;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stage-dot {
+  display: block;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--surface-1);
+}
+
+.tone-done .stage-dot {
+  background: var(--status-good);
+}
+
+.tone-refused .stage-dot {
+  background: var(--status-critical);
+}
+
+.stage-count {
+  font-size: var(--h3-size);
+  line-height: var(--h3-line);
+  font-weight: var(--h3-weight);
+  font-variant-numeric: tabular-nums;
+  margin-top: var(--s-2);
+}
+
+.stage-label {
+  font-size: var(--body-m-size);
+  line-height: 16px;
+  font-weight: 800;
+  color: var(--text-secondary);
+  padding: 0 var(--s-1);
+}
+
+.stage-pct {
+  font-size: var(--body-m-size);
+  line-height: var(--body-m-line);
+  color: var(--text-muted);
+}
+
+.process-aside {
+  flex: 0 0 96px;
+  border-left: 1px dashed var(--baseline);
+  padding-left: var(--s-4);
+}
+
+.card-note {
+  font-size: var(--body-m-size);
+  line-height: var(--body-m-line);
+  color: var(--text-muted);
+  margin: var(--s-4) 0 0;
+}
+
+.process-card {
+  margin-bottom: var(--s-5);
 }
 
 /* ---------- cards & grid ---------- */
@@ -1143,6 +1283,49 @@ button.secondary:disabled {
 @media (max-width: 720px) {
   .grid.two {
     grid-template-columns: 1fr;
+  }
+  .milestone-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .milestone-grid .featured {
+    grid-row: auto;
+    grid-column: 1 / -1;
+  }
+  /* Nine stages will not fit across a phone; run the line downwards. */
+  .process {
+    flex-direction: column;
+  }
+  .process-line {
+    flex-direction: column;
+    width: 100%;
+  }
+  .stage {
+    flex-direction: row;
+    gap: var(--s-3);
+    text-align: left;
+  }
+  .stage-track {
+    width: 44px;
+    flex: 0 0 44px;
+  }
+  .stage-count {
+    margin-top: 0;
+    min-width: 3ch;
+  }
+  .process-line .stage + .stage::before {
+    top: auto;
+    bottom: 50%;
+    left: 21px;
+    right: auto;
+    width: 2px;
+    height: 100%;
+  }
+  .process-aside {
+    flex: 0 0 auto;
+    border-left: 0;
+    border-top: 1px dashed var(--baseline);
+    padding: var(--s-2) 0 0;
+    width: 100%;
   }
   .app {
     padding: var(--s-5) var(--s-4) var(--s-7);

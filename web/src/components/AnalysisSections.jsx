@@ -34,12 +34,12 @@ function RichText({ children, title }) {
 /**
  * The written analysis, with per-section controls.
  *
- * Each section can be hidden or replaced with pasted text. Both are held as
+ * Each section can be excluded or edited. Both are held as
  * `overrides` in the parent and posted with the download request, so the HTML
  * and PDF always match what is on screen.
  *
  * Sections tagged `computed` are filled from the data rather than generated, so
- * they are present even when the local model is unavailable.
+ * they are present even when the language model is unavailable.
  */
 export default function AnalysisSections({ sections, overrides, onChange }) {
   const [editing, setEditing] = useState(null);
@@ -100,7 +100,7 @@ export default function AnalysisSections({ sections, overrides, onChange }) {
                         setDraft(replaced || s.body || '');
                       }}
                     >
-                      Replace
+                      Edit
                     </button>
                     {replaced ? (
                       <button className="link-btn" onClick={() => restore(s.id)}>
@@ -108,7 +108,7 @@ export default function AnalysisSections({ sections, overrides, onChange }) {
                       </button>
                     ) : null}
                     <button className="link-btn" onClick={() => setHidden(s.id, !isHidden)}>
-                      {isHidden ? 'Show' : 'Hide'}
+                      {isHidden ? 'Undo Exclude' : 'Exclude'}
                     </button>
                   </>
                 )}
@@ -121,7 +121,7 @@ export default function AnalysisSections({ sections, overrides, onChange }) {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   rows={5}
-                  aria-label={`Replacement text for ${s.title}`}
+                  aria-label={`Edit text for ${s.title}`}
                 />
                 <div className="an-actions">
                   <button className="link-btn" onClick={() => saveText(s.id)}>
@@ -133,7 +133,7 @@ export default function AnalysisSections({ sections, overrides, onChange }) {
                 </div>
               </div>
             ) : isHidden ? (
-              <p className="an-muted">Hidden — will not appear in the report or downloads.</p>
+              <p className="an-muted">Excluded — will not appear in the report or downloads.</p>
             ) : (
               <RichText title={s.title}>{body}</RichText>
             )}
