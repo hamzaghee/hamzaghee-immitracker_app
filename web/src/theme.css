@@ -1245,6 +1245,61 @@ button.secondary:disabled {
   margin-bottom: var(--s-2);
 }
 
+/* An AI note under a chart: same controls, quieter frame. */
+.an-card.inline {
+  margin: var(--s-4) 0 0;
+  padding: var(--s-3) var(--s-4);
+  background: var(--ink-50);
+  box-shadow: none;
+}
+
+.an-card.inline .an-head h4 {
+  font-size: var(--body-m-size);
+  line-height: var(--body-m-line);
+}
+
+.an-card.inline p,
+.an-card.inline .an-list {
+  font-size: var(--body-m-size);
+  line-height: var(--body-m-line);
+}
+
+.milestone-note {
+  margin: 0 0 var(--s-4);
+}
+
+.milestone-insight .an-card.inline {
+  margin: 0 0 var(--s-5);
+}
+
+/* What the fact check removed — on screen only, never exported. */
+.qa-summary {
+  font-size: var(--body-m-size);
+  line-height: var(--body-m-line);
+  color: var(--text-secondary);
+  margin: 0 0 var(--s-4);
+}
+
+.qa-summary summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.qa-summary ul {
+  margin: var(--s-2) 0 0;
+  padding-left: var(--s-5);
+}
+
+.qa-summary li {
+  margin: var(--s-2) 0;
+}
+
+.qa-text {
+  display: block;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
 .empty-note {
   font-size: var(--body-m-size);
   line-height: var(--body-m-line);

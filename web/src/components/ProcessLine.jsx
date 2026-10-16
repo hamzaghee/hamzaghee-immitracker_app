@@ -19,7 +19,7 @@ const Stage = ({ stage, as: Tag = 'li', className = 'stage' }) => (
  * number underneath carries the exact value. The export draws the same thing
  * from the same `processStages()` data.
  */
-export default function ProcessLine({ summary }) {
+export default function ProcessLine({ summary, insight }) {
   const { stages, refused, other } = processStages(summary);
   if (!stages.length) return null;
 
@@ -38,6 +38,7 @@ export default function ProcessLine({ summary }) {
         {PROCESS_NOTE}
         {other ? ` ${fmt(other)} cases have another or no status and are not shown.` : ''}
       </p>
+      {insight}
     </section>
   );
 }

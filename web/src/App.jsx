@@ -12,7 +12,7 @@ import {
 import PasswordGate from './components/PasswordGate.jsx';
 import ReportConfig from './components/ReportConfig.jsx';
 import ProgressView from './components/ProgressView.jsx';
-import AnalysisSections from './components/AnalysisSections.jsx';
+import AnalysisSections, { SectionCard } from './components/AnalysisSections.jsx';
 import BarChart from './components/BarChart.jsx';
 import LineChart from './components/LineChart.jsx';
 import DonutChart from './components/DonutChart.jsx';
@@ -28,6 +28,9 @@ import {
   crsRows,
   crsNotes,
   coverageNote,
+  outlierNote,
+  joinNotes,
+  CHART,
   DRAW_CATEGORY_LEAD,
   END_TO_END_NOTE,
 } from '@shared/reportData.js';
@@ -276,6 +279,16 @@ export default function App() {
 
   const pctOf = (n) => `${((n / (s.totalRecordsAnalyzed || 1)) * 100).toFixed(1)}% of cases`;
 
+  // AI notes sit under the chart they explain; most charts have none.
+  const notesByChart = new Map((result.sections || []).filter((x) => x.chart).map((x) => [x.chart, x]));
+  const insightFor = (chart) => {
+    const section = notesByChart.get(chart);
+    return section ? (
+      <SectionCard inline section={section} overrides={overrides} onChange={setOverrides} />
+    ) : null;
+  };
+  const excluded = (chart) => outlierNote(s, chart);
+
   const drawShare = shareRows(s.drawCategoryCounts, s.drawCategorySpecified);
   const drawNote = coverageNote(DRAW_CATEGORY_LEAD, s.drawCategorySpecified, s.totalRecordsAnalyzed);
   const drawTimes = meanRows(s.processingByDrawCategory);
@@ -386,10 +399,17 @@ export default function App() {
         <span className="tile-note-swatch" aria-hidden="true" />
         {END_TO_END_NOTE}
       </p>
+      {excluded(CHART.milestones) ? <p className="card-note milestone-note">{excluded(CHART.milestones)}</p> : null}
+      {insightFor(CHART.milestones) ? <div className="milestone-insight">{insightFor(CHART.milestones)}</div> : null}
 
-      <ProcessLine summary={s} />
+      <ProcessLine summary={s} insight={insightFor(CHART.process)} />
 
-      <AnalysisSections sections={result.sections} overrides={overrides} onChange={setOverrides} />
+      <AnalysisSections
+        sections={result.sections}
+        overrides={overrides}
+        onChange={setOverrides}
+        qa={result.qa}
+      />
 
       <h2 className="section-title">Charts</h2>
 
@@ -403,6 +423,7 @@ export default function App() {
           ]}
           rows={streams.map((d) => ({ ...d, key: d.label }))}
           legend={streams.map((d) => ({ label: `${d.label} — ${fmt(d.value)}`, color: d.color }))}
+          insight={insightFor(CHART.streams)}
         >
           <DonutChart data={streams} size={210} centerLabel="cases" />
         </ChartCard>
@@ -415,6 +436,7 @@ export default function App() {
             { key: 'value', label: 'Cases', num: true },
           ]}
           rows={toSorted(s.statusBreakdown).map((d) => ({ ...d, key: d.label }))}
+          insight={insightFor(CHART.status)}
         >
           <BarChart data={toSorted(s.statusBreakdown)} gutter={135} />
         </ChartCard>
@@ -429,6 +451,7 @@ export default function App() {
             { key: 'value', label: 'Cases', num: true },
           ]}
           rows={countries.map((d) => ({ ...d, key: d.label }))}
+          insight={insightFor(CHART.countries)}
         >
           <BarChart data={countries} gutter={170} />
         </ChartCard>
@@ -441,6 +464,7 @@ export default function App() {
             { key: 'value', label: 'Cases', num: true },
           ]}
           rows={nationalities.map((d) => ({ ...d, key: d.label }))}
+          insight={insightFor(CHART.nationalities)}
         >
           <BarChart data={nationalities} gutter={170} />
         </ChartCard>
@@ -454,6 +478,8 @@ export default function App() {
           { key: 'value', label: 'Avg days', num: true },
         ]}
         rows={streamAvg.map((d) => ({ ...d, key: d.label }))}
+        note={excluded(CHART.streamTimes)}
+        insight={insightFor(CHART.streamTimes)}
       >
         <BarChart data={streamAvg} gutter={130} valueSuffix="d" />
       </ChartCard>
@@ -465,6 +491,7 @@ export default function App() {
           note={drawNote}
           columns={shareCols('Draw category')}
           rows={drawShare.map((d) => ({ ...d, key: d.label }))}
+          insight={insightFor(CHART.drawShare)}
         >
           <BarChart
             data={withSub(drawShare, (d) => `${fmt(d.count)} cases`)}
@@ -478,9 +505,10 @@ export default function App() {
         <ChartCard
           title="Average processing time by draw category"
           desc="Mean Submission → PPR of completed cases, busiest category first"
-          note={drawTimesNote}
+          note={joinNotes(drawTimesNote, excluded(CHART.drawTimes))}
           columns={meanCols('Draw category')}
           rows={drawTimes.map((d) => ({ ...d, key: d.label }))}
+          insight={insightFor(CHART.drawTimes)}
         >
           <BarChart
             data={withSub(drawTimes, (d) => `${fmt(d.count)} completed cases`)}
@@ -494,6 +522,8 @@ export default function App() {
           desc="Mean Submission → PPR for the 10 nationalities with the most completed cases"
           columns={meanCols('Nationality')}
           rows={nationalityTimes.map((d) => ({ ...d, key: d.label }))}
+          note={excluded(CHART.nationalityTimes)}
+          insight={insightFor(CHART.nationalityTimes)}
         >
           <BarChart
             data={withSub(nationalityTimes, (d) => `${fmt(d.count)} completed cases`)}
@@ -511,6 +541,7 @@ export default function App() {
               title={c.title}
               desc={c.desc}
               note={c.note}
+              insight={insightFor(c.key === 'pnp' ? CHART.crsPnp : CHART.crsGeneral)}
               columns={crsCols}
               rows={c.rows.map((d) => ({ ...d, key: d.label }))}
             >
@@ -529,6 +560,7 @@ export default function App() {
             { key: 'value', label: 'Cases', num: true },
           ]}
           rows={monthlySubs.map((d) => ({ ...d, key: d.label }))}
+          insight={insightFor(CHART.monthlySubmissions)}
         >
           <LineChart data={monthlySubs} height={220} />
         </ChartCard>
@@ -541,6 +573,8 @@ export default function App() {
             { key: 'value', label: 'Avg days', num: true },
           ]}
           rows={monthlyTimes.map((d) => ({ ...d, key: d.label }))}
+          note={excluded(CHART.monthlyTimes)}
+          insight={insightFor(CHART.monthlyTimes)}
         >
           <LineChart data={monthlyTimes} height={220} valueSuffix="d" />
         </ChartCard>
@@ -560,6 +594,8 @@ export default function App() {
           { label: 'Longest case', color: 'var(--series-2)' },
           { label: 'Shortest case', color: 'var(--series-1)' },
         ]}
+        note={excluded(CHART.comparison)}
+        insight={insightFor(CHART.comparison)}
       >
         <GroupedBarChart data={comparison} anySelected={config?.stream !== 'all'} />
       </ChartCard>
@@ -570,6 +606,8 @@ export default function App() {
           desc="Longest Submission → PPR durations"
           columns={caseCols}
           rows={s.slowestCases.map(caseRow)}
+          note={excluded(CHART.slowest)}
+          insight={insightFor(CHART.slowest)}
         >
           <BarChart data={caseBars(s.slowestCases)} gutter={190} valueSuffix="d" />
         </ChartCard>
@@ -579,6 +617,8 @@ export default function App() {
           desc="Shortest Submission → PPR durations"
           columns={caseCols}
           rows={s.quickestCases.map(caseRow)}
+          note={excluded(CHART.quickest)}
+          insight={insightFor(CHART.quickest)}
         >
           <BarChart data={caseBars(s.quickestCases)} gutter={190} valueSuffix="d" />
         </ChartCard>

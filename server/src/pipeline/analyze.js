@@ -15,6 +15,7 @@
 import { parseLooseDate } from './filter.js';
 import { STREAM_GROUPS, COMPARISON_GROUPS } from './streamGroups.js';
 import { countryNameMap } from '../../../shared/text.js';
+import { detectOutliers, withinFences } from './outliers.js';
 
 const PPR_FIELD = 'Portal 2 Email / PPR Date';
 const MS_PER_DAY = 86400000;
@@ -197,10 +198,19 @@ export function calculateStats(arr, key) {
  *   but the report flow passes the period-filtered set *before* the stream
  *   filter — otherwise selecting PNP leaves the FSW and CEC buckets empty and
  *   the comparison chart has nothing to compare.
+ * @param {boolean} [options.excludeOutliers]
+ *   Take extreme processing-time cases out of every timing figure (see
+ *   outliers.js). Counts are unaffected. Off by default so the pinned-output
+ *   check keeps comparing like with like; the report flow turns it on.
  * @returns {object} the summary payload
  */
-export function analyze(records, { comparisonRecords = records } = {}) {
+export function analyze(records, { comparisonRecords = records, excludeOutliers = false } = {}) {
   const totalRecords = records.length;
+
+  // `timed` backs every processing-time figure; `records` every count.
+  const outliers = excludeOutliers ? detectOutliers(records) : null;
+  const timed = outliers ? records.filter((r) => !outliers.isOutlier(r)) : records;
+  const timedComparison = outliers ? withinFences(comparisonRecords, outliers) : comparisonRecords;
 
   const streamDistribution = countBy(records, 'Stream');
   const countryCounts = countBy(records, 'Country of Residence');
@@ -219,16 +229,16 @@ export function analyze(records, { comparisonRecords = records } = {}) {
   const topCountries = top10(countryCounts);
   const topNationalities = top10(nationalityCounts);
 
-  const subToPprStats = calculateStats(records, 'Days from Submission to PPR');
-  const aorToPprStats = calculateStats(records, 'Days from AOR to PPR');
-  const aorToMedsStats = calculateStats(records, 'Number of Days after AOR to Meds passed');
-  const aorToBilStats = calculateStats(records, 'Number of days from AOR to BIL');
-  const medsToPprStats = calculateStats(records, 'Number of Days after Meds passed to PPR');
+  const subToPprStats = calculateStats(timed, 'Days from Submission to PPR');
+  const aorToPprStats = calculateStats(timed, 'Days from AOR to PPR');
+  const aorToMedsStats = calculateStats(timed, 'Number of Days after AOR to Meds passed');
+  const aorToBilStats = calculateStats(timed, 'Number of days from AOR to BIL');
+  const medsToPprStats = calculateStats(timed, 'Number of Days after Meds passed to PPR');
 
   // Two milestones have no precomputed column, so derive them from the dates.
-  const subToAorStats = statsOf(records.map((r) => spanDays(r, 'Submitted', 'AOR Date')));
+  const subToAorStats = statsOf(timed.map((r) => spanDays(r, 'Submitted', 'AOR Date')));
   const bilToPprStats = statsOf(
-    records.map((r) => spanDays(r, 'Biometrics Invitation Letter', PPR_FIELD))
+    timed.map((r) => spanDays(r, 'Biometrics Invitation Letter', PPR_FIELD))
   );
 
   // "Approved" = reached PPR. Keyed off the PPR date rather than Current Status,
@@ -238,7 +248,7 @@ export function analyze(records, { comparisonRecords = records } = {}) {
   // Stream vs Submission-to-PPR: per-stream averages plus the raw points.
   const streamSubToPpr = {};
   const streamVsSubToPprPoints = [];
-  for (const r of records) {
+  for (const r of timed) {
     const stream = r['Stream'];
     const days = parseFloat(r['Days from Submission to PPR']);
     if (stream !== undefined && stream !== null && stream !== '' && !isNaN(days)) {
@@ -271,7 +281,7 @@ export function analyze(records, { comparisonRecords = records } = {}) {
   // Mean Submission→PPR bucketed by submission month, so it shares an x-axis
   // with monthlySubmissions above.
   const monthlyDuration = {};
-  for (const r of records) {
+  for (const r of timed) {
     const d = parseLooseDate(r['Submitted']);
     const days = parseFloat(r['Days from Submission to PPR']);
     if (!d || isNaN(days)) continue;
@@ -313,7 +323,7 @@ export function analyze(records, { comparisonRecords = records } = {}) {
   // by group so a future Spousal/Citizenship upload can extend it unchanged.
   const streamComparison = COMPARISON_GROUPS.map((key) => {
     const allowed = new Set(STREAM_GROUPS[key].values);
-    const days = comparisonRecords
+    const days = timedComparison
       .filter((r) => allowed.has(r['Stream']))
       .map((r) => parseFloat(r['Days from Submission to PPR']))
       .filter((n) => !isNaN(n))
@@ -330,7 +340,7 @@ export function analyze(records, { comparisonRecords = records } = {}) {
   // Slowest / quickest by Submission-to-PPR. `slug` is added on top of the n8n
   // shape: Case ID is empty in this dataset, so the slug is the only stable
   // per-case identifier available for chart labels.
-  const casesWithDays = records
+  const casesWithDays = timed
     .map((r) => {
       const slug = r['_slugs'] || '';
       const nationality = r['Nationality'] || '';
@@ -360,11 +370,11 @@ export function analyze(records, { comparisonRecords = records } = {}) {
   const approvedRecords = records.filter((r) => parseLooseDate(r[PPR_FIELD]));
   const approvalsByDrawCategory = countBy(approvedRecords, DRAW_FIELD);
 
-  const processingByDrawCategory = meanDaysBy(records, (r) => r[DRAW_FIELD]);
+  const processingByDrawCategory = meanDaysBy(timed, (r) => r[DRAW_FIELD]);
   // Nationality has a long tail of one-case countries; keep the ten with the
   // most completed cases so each average rests on a real sample.
   const processingByNationality = Object.fromEntries(
-    Object.entries(meanDaysBy(records, (r) => r['Nationality']))
+    Object.entries(meanDaysBy(timed, (r) => r['Nationality']))
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 10)
   );
@@ -459,5 +469,11 @@ export function analyze(records, { comparisonRecords = records } = {}) {
     // Cases with a status outside the process line, or none at all.
     otherStatusCount: otherStatusCount + unknownStatusCount,
     crsDistribution: crsDistribution(records),
+
+    /* ---- added for the AI analysis revision ---- */
+
+    // Extreme cases left out of the timing figures above, or null when
+    // exclusion was not requested. Charts cite this in their notes.
+    outliers: outliers ? outliers.summary : null,
   };
 }

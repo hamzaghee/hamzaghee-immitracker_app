@@ -5,8 +5,11 @@ import { fmt } from './primitives.jsx';
  * Card wrapper providing every chart with a table-view twin. The table is not
  * optional polish: three light-mode series colours sit below 3:1 contrast, and
  * the relief rule requires a WCAG-clean way to read the same values.
+ *
+ * `insight` is the AI note for this chart, when the analysis found something
+ * worth saying about it; most charts have none.
  */
-export default function ChartCard({ title, desc, note, columns, rows, legend, children }) {
+export default function ChartCard({ title, desc, note, columns, rows, legend, insight, children }) {
   const [view, setView] = useState('chart');
 
   return (
@@ -70,6 +73,7 @@ export default function ChartCard({ title, desc, note, columns, rows, legend, ch
       )}
       {/* Shown in both views: it qualifies the figures, not the drawing. */}
       {note ? <p className="card-note">{note}</p> : null}
+      {insight}
     </section>
   );
 }

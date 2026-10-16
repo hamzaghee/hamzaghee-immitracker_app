@@ -20,6 +20,7 @@ import {
   DEFAULT_STREAM_GROUP,
 } from './pipeline/streamGroups.js';
 import { analyze } from './pipeline/analyze.js';
+import { buildFindings } from './pipeline/findings.js';
 import {
   computedSections,
   assembleSections,
@@ -39,13 +40,14 @@ export const REPORT_TYPES = {
 export const listReportTypes = () =>
   Object.entries(REPORT_TYPES).map(([value, v]) => ({ value, ...v }));
 
-const STEP_ORDER = ['filtering', 'analysing', 'ai-analysis', 'rendering'];
+const STEP_ORDER = ['filtering', 'analysing', 'ai-analysis', 'fact-check', 'rendering'];
 const STEP_LABELS = {
   filtering: 'Applying filters',
   analysing: 'Analysing filtered data',
   // Names the wait explicitly: this is the one step that takes noticeable time,
   // so telling the reader roughly how long beats a bare label.
   'ai-analysis': 'Generating AI Analysis. This might take a minute.',
+  'fact-check': 'Fact-checking the AI Analysis',
   rendering: 'Building report',
 };
 
@@ -117,6 +119,7 @@ export function startReport(config) {
     sections: null,
     meta: null,
     notice: '',
+    qa: null,
   };
   jobs.set(id, job);
   evict();
@@ -159,21 +162,53 @@ async function run(job) {
   //
   // The comparison chart is fed the period-filtered rows *before* the stream
   // filter, so it always spans all programmes even when one stream is selected.
+  //
+  // Extreme processing times are left out of every timing figure; each chart
+  // they would have changed says so. The findings are the questions the AI
+  // analysis is written from (see pipeline/findings.js).
   setStep(job, 'analysing', 'running');
-  const summary = analyze(filtered, { comparisonRecords: byPeriod });
+  const summary = analyze(filtered, { comparisonRecords: byPeriod, excludeOutliers: true });
   job.summary = summary;
-  setStep(job, 'analysing', 'done', `${summary.totalRecordsAnalyzed.toLocaleString('en-CA')} cases analysed`);
+  const { findings, asked } = buildFindings(filtered, summary);
+  setStep(
+    job,
+    'analysing',
+    'done',
+    `${summary.totalRecordsAnalyzed.toLocaleString('en-CA')} cases analysed · ${findings.length} of ${asked} questions notable`
+  );
 
   const labelled = { ...config, periodLabel: periodLabel(config) };
 
-  // 3. written analysis — degrades rather than failing the report
+  // 3. written analysis, then its fact check — degrades rather than failing
+  // the report
   setStep(job, 'ai-analysis', 'running');
   const computed = computedSections(summary, labelled);
-  const generated = await generateInsights(summary, labelled);
+  const generated = await generateInsights(summary, labelled, findings, {
+    onStage: (stage) => {
+      if (stage === 'checking') {
+        setStep(job, 'ai-analysis', 'done');
+        setStep(job, 'fact-check', 'running');
+      }
+    },
+  });
   if (generated.available) {
+    const { qa } = generated;
     setStep(job, 'ai-analysis', 'done', `via ${generated.model}`);
+    setStep(
+      job,
+      'fact-check',
+      'done',
+      `${qa.kept} of ${qa.checked} passed${qa.reviewer ? ` · reviewed by ${qa.reviewer}` : ''}`
+    );
+    job.qa = qa;
+  } else if (generated.withheld) {
+    setStep(job, 'fact-check', 'failed', generated.reason);
+    job.notice =
+      'Written commentary was withheld because it could not be fact-checked. ' +
+      'Every computed figure in this report is complete.';
   } else {
     setStep(job, 'ai-analysis', 'skipped', generated.reason);
+    setStep(job, 'fact-check', 'skipped');
     job.notice =
       'Written commentary was skipped because the analysis model was unavailable. ' +
       'Every computed figure in this report is complete.';
@@ -219,6 +254,9 @@ export const jobResult = (job) => {
     notice: job.notice,
     summary: job.summary,
     sections: job.sections,
+    // What the fact check removed and why — shown on the report page so the
+    // reader can see the check working; never part of the export.
+    qa: job.qa,
   };
 };
 

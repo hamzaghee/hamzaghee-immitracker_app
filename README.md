@@ -15,7 +15,7 @@ Read/Write Files from Disk        →    server/src/dataStore.js
 Relabel Rows                      →    server/src/pipeline/relabel.js
 Filter 18 months                  →    server/src/pipeline/filter.js
 Analysis - Code                   →    server/src/pipeline/analyze.js
-Analysis - LLM + Output Parser    →    server/src/pipeline/insights.js  (optional)
+Analysis - LLM + Output Parser    →    server/src/pipeline/insights.js  (optional — see AI analysis)
 Webpage Coder + write dashboard   →    web/  (React, live)
 ```
 
@@ -147,7 +147,7 @@ Two things worth knowing about this check:
 | `GET /api/summary` | The dashboard payload (the "Analysis - Code" output plus a `meta` block) |
 | `GET /api/cases` | Paginated case rows — `stream`, `status`, `limit`, `offset`, `sort`, `dir` |
 | `GET /api/health` | Mode, dataset registry, LLM and PDF availability |
-| `GET /api/insights` | Analysis for an arbitrary slice; computed sections always, generated ones when a key is set |
+| `GET /api/insights` | Analysis for an arbitrary slice: the findings, computed sections always, generated ones when a key is set and they pass the fact check |
 | `GET /api/datasets` | List uploaded datasets, newest first |
 | `POST /api/datasets` | Upload a new export (`multipart/form-data`, field `file`) |
 | `DELETE /api/datasets/:id` | Remove one dataset |
@@ -170,6 +170,46 @@ slice is that default, and `custom` otherwise.
 Further environment: `DATA_PATH`, `UPLOAD_DIR`, `MAX_UPLOAD_MB` (default 250),
 `MAX_CACHED_DATASETS` (default 3). See Deployment modes above for the rest.
 
+## AI analysis
+
+The written analysis is built in three steps, so the model explains the data
+rather than inventing it:
+
+1. **Find (code).** `pipeline/findings.js` runs a bank of questions over the
+   report slice: which months stand apart and why (one extreme case, or a
+   cohort from one invitation round), whether recent months only look fast
+   because their slow cases are unfinished, which draw categories and
+   nationalities differ, what the slowest cases share, whether an additional
+   document request goes with a longer wait, and so on. Each question has a
+   rule for what counts as notable and a minimum sample. Only the notable
+   answers go on, strongest first.
+2. **Write (model).** The model turns those findings into an executive summary,
+   three to five key takeaways, and at most one short note per chart, placed
+   under the chart it explains. It may skip anything the chart already makes
+   obvious, so most charts have no note. Figures reach it already rounded the
+   way the report prints them, and both model calls get a glossary of the
+   report's terms (`pipeline/glossary.js`).
+3. **Check.** `pipeline/factCheck.js` checks every generated passage twice and
+   removes what fails. First in code: it must cite real findings, sit under one
+   of their charts, state each finding's headline number, contain no number
+   that is not in its sources, keep every comparison the right way round and
+   between the right groups, never give a processing time as a multiple
+   ("1.4 times the speed"), never call PPR permanent residence, and offer no
+   cause at all for a nationality pattern. The most damaging errors are
+   caught here rather than left to a model. Then a
+   **separate model call**, with its own reviewer prompt, compares each passage
+   with its sources for reversed comparisons, unsupported claims, causes stated
+   as fact, and causes suggested for nationality patterns. If the reviewer
+   cannot run, nothing generated is published. The report page shows what was
+   removed and why; the export does not.
+
+**Extreme cases** are taken out of every processing-time figure rather than
+shown alongside: anything more than three interquartile ranges beyond the
+middle half of completed cases (`pipeline/outliers.js`, needs at least 20
+completed cases). They still count as cases. Each chart they would have changed
+says what was excluded, and the analysis can comment on them. `/api/summary`
+and `npm run verify` leave them in, so the n8n comparison is unchanged.
+
 ## Choosing a model
 
 Measured against this API with the real report prompt and schema, 7 runs each
@@ -188,8 +228,8 @@ Measured against this API with the real report prompt and schema, 7 runs each
 
 When a model is overloaded — 429, 5xx, or no response within 60s — the next
 one in the chain is tried without any message to the user; the report's
-progress step records which model answered. The whole chain is capped at three
-minutes. Other failures (bad key, retired model, malformed output) stop at
+progress step records which model answered. The writer and the fact check
+share a four-minute budget. Other failures (bad key, retired model, malformed output) stop at
 once, so a configuration error is not hidden behind the fallbacks.
 
 Three things worth knowing:

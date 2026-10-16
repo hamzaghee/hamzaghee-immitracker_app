@@ -1,101 +1,41 @@
 /**
  * Report analysis — the "AI Analysis" stage.
  *
- * Split deliberately in two:
+ * Three kinds of text, from three sources:
  *
  *   Analyses 1-3 are *computed*. The report spec gives exact sentence
  *   templates with numeric slots, so a language model adds nothing but risk;
  *   these are filled from the summary and are always correct and always
  *   present, even with no model running.
  *
- *   The executive summary and the three closing insight points are *generated*,
- *   because they call for actual prose. These degrade: if the model is
- *   unreachable or no API key is configured, the report still renders with every
- *   computed section intact and says the generated commentary was skipped.
+ *   The executive summary, the key takeaways and the notes under each chart
+ *   are *generated*. Code first runs a bank of questions over the data
+ *   (findings.js) and keeps only the answers that stand out; the model writes
+ *   those up in plain language and may skip any the chart already makes
+ *   obvious. So there is not a note for every chart — only where there is
+ *   something worth saying.
+ *
+ *   Everything generated is then fact-checked (factCheck.js): in code, then by
+ *   a second, separate model call. Whatever fails is removed, and if the check
+ *   cannot run, nothing generated is published.
  *
  * Every section carries { id, title, body, source } so the report page can hide
- * or replace any of them individually.
- *
- * Generation goes to Google's Generative Language API. The key travels in the
- * x-goog-api-key header rather than the query string, so it cannot end up in
- * request logs, proxy access logs or browser history, and it is never returned
- * to the client.
+ * or replace any of them individually; chart notes also carry `chart`, the id
+ * of the chart they sit under.
  */
 
-import { DAYS_PER_MONTH, daysToMonths } from './analyze.js';
+import { daysToMonths } from './analyze.js';
+import { generateJson, llmConfigured, probeLlm } from './llm.js';
+import { mechanicalCheck, reviewWithModel } from './factCheck.js';
+import { glossaryText } from './glossary.js';
+import { CHART } from '../../../shared/reportData.js';
 
-const API_BASE =
-  process.env.LLM_API_BASE || 'https://generativelanguage.googleapis.com/v1beta';
-const API_KEY = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
-/**
- * The API lists models as "models/<id>", and the URL this builds already
- * includes that segment — so strip the prefix rather than producing
- * ".../models/models%2F<id>", which 404s. Copying an id straight from the
- * models listing is the obvious thing to do, so it should just work.
- */
-const normaliseModel = (m) => String(m || '').replace(/^models\//, '').trim();
+export { probeLlm };
 
-/**
- * Measured on this API against the real report prompt and schema, 7 runs each
- * (October 2026):
- *
- *   gemini-flash-lite-latest  7/7, ~4s                     <- default
- *   gemini-3.5-flash-lite     6/7, ~4s                     <- fallback 1
- *   gemini-3.1-flash-lite     4/7, ~2s, otherwise 503      <- fallback 2
- *   gemini-3.7-flash          2/7, ~110s, otherwise 503    <- fallback 3
- *   gemma-4-31b-it            0/7, 500 / 503 throughout
- *   gemini-flash-latest       1/7, 503 or timeout
- *   gemini-2.5-*              404, no longer available to new keys
- *   gemini-pro-latest         429, no free-tier quota
- *
- * Override with LLM_MODEL; a "models/" prefix is accepted.
- */
-const LLM_MODEL = normaliseModel(process.env.LLM_MODEL) || 'gemini-flash-lite-latest';
-
-/**
- * Models tried in order when the one before is overloaded. Override with a
- * comma-separated LLM_FALLBACK_MODELS; set it empty to disable fallback. The
- * primary is never repeated, and at most three fallbacks are used.
- */
-const MAX_FALLBACKS = 3;
-const FALLBACK_MODELS = [
-  ...new Set(
-    (process.env.LLM_FALLBACK_MODELS ?? 'gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3.7-flash')
-      .split(',')
-      .map(normaliseModel)
-      .filter((m) => m && m !== LLM_MODEL)
-  ),
-].slice(0, MAX_FALLBACKS);
-const MODEL_CHAIN = [LLM_MODEL, ...FALLBACK_MODELS];
-
-/**
- * Overload signals — the only failures worth moving to the next model on. A
- * bad key (400/403) or retired model (404) fails the same way everywhere, so
- * those return at once rather than hiding a configuration error behind the
- * fallbacks.
- */
-const OVERLOAD_STATUSES = new Set([429, 500, 502, 503, 504]);
-
-/**
- * Per-attempt and whole-call limits. Healthy responses arrive in seconds; an
- * overloaded model tends to hang until the timeout, so a full two minutes per
- * attempt across four models would stall the report for eight.
- */
-const ATTEMPT_TIMEOUT_MS = 60000;
-const TOTAL_BUDGET_MS = 180000;
-
-/**
- * Send `responseSchema` alongside the JSON mime type.
- *
- * Measured against this API: Gemma **requires** the schema. With the mime type
- * alone it returns its reasoning as prose rather than JSON, and the parse
- * fails. (An earlier comment here claimed the reverse — that Gemma handled
- * schemas poorly — which was an assumption, not a test.)
- *
- * LLM_USE_SCHEMA=0 remains as an escape hatch for a model that rejects the
- * schema outright, but it should not be needed for Gemma or Gemini.
- */
-const USE_SCHEMA = process.env.LLM_USE_SCHEMA !== '0';
+/** Whole budget for both model calls, writer and reviewer. */
+const TOTAL_BUDGET_MS = 240000;
+/** The reviewer is not started with less than this left; the report fails closed instead. */
+const MIN_REVIEW_MS = 20000;
 
 const PERSONA =
   'You are a Canadian immigration expert analyst. You provide impartial, ' +
@@ -137,6 +77,7 @@ export function periodLabel({ from, to } = {}) {
 export function computedSections(s, config = {}) {
   const out = [];
   const period = periodLabel(config);
+  const excluded = s.outliers?.count || 0;
 
   out.push({
     id: 'analysis-1',
@@ -145,7 +86,10 @@ export function computedSections(s, config = {}) {
     body:
       `Over ${period}, on average it took ${months(s.daysSubmissionToPPR.mean)} for applications ` +
       `to go from submission to final approval (Portal 2 / PPR). ` +
-      `This is based on ${s.daysSubmissionToPPR.count.toLocaleString('en-CA')} cases that have reached PPR.`,
+      `This is based on ${s.daysSubmissionToPPR.count.toLocaleString('en-CA')} cases that have reached PPR.` +
+      (excluded
+        ? ` ${excluded === 1 ? 'One extreme case is' : `${excluded} extreme cases are`} left out of this and every other processing time, because ${excluded === 1 ? 'it' : 'they'} would distort the averages.`
+        : ''),
   });
 
   if (s.slowestMonth && s.fastestMonth) {
@@ -182,250 +126,282 @@ export function computedSections(s, config = {}) {
   return out;
 }
 
-/** Re-keys a { code: count } map to { name: count } for the model's benefit. */
-const named = (counts, names) =>
-  Object.fromEntries(Object.entries(counts || {}).map(([k, v]) => [names?.[k] || k, v]));
+const round1 = (x) => Math.round(x * 10) / 10;
 
-/** Compact, unambiguous figures for the model. Months precomputed so it never divides. */
+/**
+ * The headline figures, for the executive summary. Months precomputed so the
+ * model never divides, and the percentages so it never has to either.
+ *
+ * Only the three outcomes the tiles show, which add up to the total. The
+ * current-status counts (at PPR, landed, decision made) used to sit here too,
+ * and the model listed "391 reached PPR" next to "128 at PPR" as if they
+ * contradicted each other.
+ */
 function factSheet(s, config) {
+  // Rounded as the report prints them — see the note in findings.js.
+  const share = (n) => {
+    const p = s.totalRecordsAnalyzed ? (n / s.totalRecordsAnalyzed) * 100 : 0;
+    return p >= 10 ? Math.round(p) : round1(p);
+  };
   return {
     program: config.programLabel || 'Express Entry',
     stream: config.streamLabel || 'All Streams',
     period: periodLabel(config),
     casesSubmitted: s.totalRecordsAnalyzed,
-    approvedReachedPPR: s.approvedCount,
-    refused: s.refusalCount,
-    inProgress: s.inProgressCount,
-    landed: s.landedCount,
-    atPPR: s.pprCount,
-    decisionMade: s.decisionMadeCount,
-    submissionToPPR: { meanDays: s.daysSubmissionToPPR.mean, meanMonths: daysToMonths(s.daysSubmissionToPPR.mean), cases: s.daysSubmissionToPPR.count },
-    milestonesMeanDays: {
-      submissionToAor: s.daysSubmissionToAor.mean,
-      aorToMedicals: s.daysAorToMeds.mean,
-      aorToBiometricsLetter: s.daysAorToBil.mean,
-      aorToPPR: s.daysAorToPPR.mean,
-      biometricsToPPR: s.daysBilToPPR.mean,
-      medicalsToPPR: s.daysMedsToPPR.mean,
+    approvedCases: s.approvedCount,
+    approvedPct: share(s.approvedCount),
+    stillInProgressCases: s.inProgressCount,
+    stillInProgressPct: share(s.inProgressCount),
+    refusedCases: s.refusalCount,
+    refusedPct: share(s.refusalCount),
+    definitions:
+      'Approved means the case has reached PPR, including cases that have since landed. ' +
+      'Approved, still in progress and refused add up to the cases submitted.',
+    submissionToPPR: {
+      meanDays: Math.round(s.daysSubmissionToPPR.mean),
+      meanMonths: daysToMonths(s.daysSubmissionToPPR.mean),
+      cases: s.daysSubmissionToPPR.count,
     },
+    extremeCasesExcludedFromTimes: s.outliers?.count || 0,
     streamDistribution: s.streamDistribution,
-    statusBreakdown: s.statusBreakdown,
-    // Full country names rather than ISO codes: the model was translating the
-    // codes itself, and getting some of them wrong.
-    topCountriesOfResidence: named(s.topCountriesOfResidence, s.countryNames),
-    topNationalities: named(s.topNationalities, s.countryNames),
-    slowestMonth: s.slowestMonth,
-    fastestMonth: s.fastestMonth,
-    streamComparisonDays: s.streamComparison,
-    // Optional field: only `casesSpecifying` of the cases filled it in.
-    drawCategories: {
-      casesSpecifying: s.drawCategorySpecified,
-      counts: s.drawCategoryCounts,
-      submissionToPPRMeanDays: s.processingByDrawCategory,
-    },
   };
 }
 
-const schema = {
-  type: 'object',
-  properties: {
-    executive_summary: {
-      type: 'string',
-      description:
-        'Two to four sentences. State the number of cases, refusals with percentage, and the average submission-to-PPR duration. Then a "big picture" sentence giving the Landed, PPR and Decision Made counts.',
-    },
-    insight_1_title: { type: 'string' },
-    insight_1_text: { type: 'string' },
-    insight_2_title: { type: 'string' },
-    insight_2_text: { type: 'string' },
-    insight_3_title: { type: 'string' },
-    insight_3_text: { type: 'string' },
-  },
-  required: [
-    'executive_summary',
-    'insight_1_title', 'insight_1_text',
-    'insight_2_title', 'insight_2_text',
-    'insight_3_title', 'insight_3_text',
-  ],
+/** What a reader sees at each chart, so the model knows what is already obvious. */
+const CHART_DESCRIPTIONS = {
+  [CHART.milestones]: 'Processing milestones: average days for each step, Submission → AOR through to PPR',
+  [CHART.process]: 'Where applications are now: cases by current status along the process',
+  [CHART.streams]: 'Stream breakdown: share of cases by stream',
+  [CHART.status]: 'Application status: cases by current status',
+  [CHART.countries]: 'Top 10 countries of residence',
+  [CHART.nationalities]: 'Top 10 nationalities',
+  [CHART.streamTimes]: 'Average Submission → PPR by stream',
+  [CHART.drawShare]: 'Cases by draw category (share of cases)',
+  [CHART.drawTimes]: 'Average processing time by draw category',
+  [CHART.nationalityTimes]: 'Average processing time by nationality',
+  [CHART.monthlySubmissions]: 'Monthly submissions: cases by month of submission',
+  [CHART.monthlyTimes]: 'Monthly processing times: average Submission → PPR by month of submission',
+  [CHART.comparison]: 'Longest and shortest case per program',
+  [CHART.slowest]: 'The 5 slowest cases',
+  [CHART.quickest]: 'The 5 quickest cases',
 };
 
-export function buildPrompt(s, config) {
-  return `${PERSONA}
+/** A finding as the model sees it — no score, nothing it should not cite. */
+const forModel = (f) => ({
+  id: f.id,
+  chart: f.chart,
+  topic: f.topic,
+  statement: f.statement,
+  angle: f.angle,
+  key_figures: f.keyFigures,
+  facts: f.facts,
+});
 
-CRITICAL: use only the figures in the JSON below. Do not invent or extrapolate numbers.
-Express any duration in months to one decimal place. Durations are given in days;
-one month is ${DAYS_PER_MONTH} days, and monthly equivalents are already provided where relevant.
-
-REPORT DATA:
-${JSON.stringify(factSheet(s, config), null, 2)}
-
-FORMAT: write flowing prose in complete sentences. Do not include any heading or
-title inside a field — the report supplies those. Do not use bullet points,
-numbered lists, tables or any other markdown syntax.
-
-Write:
-1. executive_summary — two to four sentences covering total cases, refusals with percentage, average submission-to-PPR in months, and the spread of outcomes.
-2. Three further analytical insight points, each a short title and two to three sentences of prose. Draw them from the distributions, the milestone timings and the stream comparison. Be specific and cite the figures given. Do not repeat the executive summary.`;
-}
-
-/**
- * Whether generated prose is configured. Reports configuration only — it does
- * not call the API, so it stays cheap enough for the health endpoint. The key
- * itself is never included in the result.
- */
-export function probeLlm() {
+function writerSchema(chartIds) {
+  const cited = { type: 'array', items: { type: 'string' } };
   return {
-    available: Boolean(API_KEY),
-    provider: 'google-generative-language',
-    model: LLM_MODEL,
-    fallbackModels: FALLBACK_MODELS,
-    reason: API_KEY ? undefined : 'GOOGLE_API_KEY is not set',
+    type: 'object',
+    properties: {
+      executive_summary: { type: 'string' },
+      key_takeaways: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { text: { type: 'string' }, finding_ids: cited },
+          required: ['text', 'finding_ids'],
+        },
+      },
+      chart_notes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            // An empty enum is invalid, so a report with no charted findings
+            // falls back to a plain string; the code check rejects any stray.
+            chart: chartIds.length ? { type: 'string', enum: chartIds } : { type: 'string' },
+            finding_ids: cited,
+            text: { type: 'string' },
+          },
+          required: ['chart', 'finding_ids', 'text'],
+        },
+      },
+    },
+    required: ['executive_summary', 'key_takeaways', 'chart_notes'],
   };
 }
 
-/**
- * A model told to emit JSON often wraps it in a fenced block anyway. Strip that
- * before parsing rather than failing the whole report over punctuation.
- */
-function parseJsonLoosely(text) {
-  const trimmed = String(text || '').trim();
-  const unfenced = trimmed
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '')
-    .trim();
-  try {
-    return JSON.parse(unfenced);
-  } catch {
-    // Last resort: the outermost object in the response.
-    const start = unfenced.indexOf('{');
-    const end = unfenced.lastIndexOf('}');
-    if (start >= 0 && end > start) return JSON.parse(unfenced.slice(start, end + 1));
-    throw new Error('response was not JSON');
-  }
+export function buildWriterPrompt(s, config, findings) {
+  const charts = [...new Set(findings.map((f) => f.chart).filter(Boolean))];
+  return `${PERSONA}
+
+You are writing the commentary for a report on ${config.programLabel || 'Express Entry'} processing times (${config.streamLabel || 'All Streams'}, ${periodLabel(config)}). It is read by applicants and people following the process, not by analysts.
+
+Code has already gone through the data and picked out the FINDINGS below. Each has a plain statement that is true, an angle suggesting what it means for a reader, its key figures, and the facts behind it. Your job is to turn the interesting ones into short, natural commentary that explains what a reader would not see from the chart alone.
+
+RULES
+- Use only figures that appear in the facts of the findings you cite (or, for the executive summary, in REPORT FACTS). Do not work out new numbers: no new averages, differences, ratios or percentages.
+- Durations: write the days figure, and if you mention months use the months figure given. Never convert days to months yourself.
+- Figures are already rounded the way the report prints them. Write each one exactly as given: do not add decimals, and do not round further. Use two or three figures per note at most; pick the ones that carry the point.
+- Do not restate the statement. Lead with what it means for the reader, using the angle as a guide, then back it up with a figure or two.
+- Any text that uses a finding must state at least one of that finding's key_figures, and name the specific month, stream or group it is about. "Submissions surged in one month" is too vague; "Submissions jumped to 128 in January 2026, 2.7 times a typical month" is right.
+- Explain why something happened where the facts support it. When an explanation goes beyond the facts — for example linking a fast month to a large invitation round — word it as a possibility: "may", "might", "likely", "suggests". Never state what IRCC intended or prioritised as fact.
+- A finding whose facts include "sensitive": true involves nationality. Describe the pattern only. Do not suggest any reason for it.
+- Mention it when a finding rests on few cases.
+- Use every term as the GLOSSARY defines it. PPR is final approval, not permanent residence: write "approval (PPR)", never "permanent residence", for it.
+- Name exactly the groups a finding compares. If it compares CEC with FSW-Outland, say "FSW-Outland", never "other streams", "the rest" or "everyone else".
+- Never express a duration as a multiple ("1.4 times the speed", "twice as fast", "2 times longer"). Compare durations with the day figures, or the days difference when one is given.
+- Skip any finding a reader would see straight away from the chart, with nothing more to add. Skipping most of them is fine; a few good notes beat many thin ones.
+
+WHAT TO WRITE
+1. executive_summary: two to four sentences from REPORT FACTS: cases submitted; how many were approved, are still in progress and were refused, with their percentages; and the average Submission to PPR in days and months. Follow the definitions given.
+2. key_takeaways: the three to five most interesting findings in the whole report, one short headline sentence each, with the ids of the findings each one uses. Each one names what it is about, states the key figure, and says what it is being compared with, so the reader can tell why it matters ("CEC cases took 123 days, 33 days longer than FSW-Outland", not just "CEC cases took 123 days"). A takeaway is the headline; it should not copy a chart note.
+3. chart_notes: at most one note per chart, one to three sentences, placed under the chart its findings belong to. A note may combine several findings for the same chart. Charts with findings: ${charts.length ? charts.map((c) => `${c} (${CHART_DESCRIPTIONS[c] || c})`).join('; ') : 'none'}.
+
+STYLE
+Plain English, short sentences, the way you would explain it to a friend going through the process. No headings, no bullet points, no markdown. AOR, ITA and PPR are fine; avoid other jargon.
+Examples of the tone wanted. The brackets are placeholders: never copy them, and never use a figure that is not in the facts.
+- "[Month] looks like the slowest month, but that is mostly one case that took [N] days. With only [N] approvals that month, a single long wait is enough to pull the average up."
+- "Most of [month]'s quick approvals came from people invited in [month], which may reflect a large invitation round being processed together."
+- "Cases submitted since [month] look faster, but only [N]% of them have been approved so far. The slower ones are still waiting, so expect these months to rise."
+- "Applicants who received an extra document request waited [N] days on average, against [N] days for everyone else."
+
+GLOSSARY
+${glossaryText()}
+
+REPORT FACTS
+${JSON.stringify(factSheet(s, config), null, 2)}
+
+FINDINGS
+${JSON.stringify(findings.map(forModel), null, 2)}`;
 }
 
-/**
- * One generateContent call. Never throws. `overloaded` marks the failures that
- * justify trying the next model.
- */
-async function callModel(model, prompt, timeoutMs) {
-  try {
-    const res = await fetch(`${API_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // Header rather than ?key= so the secret stays out of any URL log.
-        'x-goog-api-key': API_KEY,
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: 'application/json',
-          ...(USE_SCHEMA ? { responseSchema: schema } : {}),
-        },
-      }),
+/** Turns the writer's JSON into checkable items, each with the sources it may draw on. */
+function toItems(json, sheet, findingsById) {
+  const sourcesOf = (ids) =>
+    (ids || [])
+      .filter((id) => findingsById.has(id))
+      .map((id) => {
+        const f = findingsById.get(id);
+        return { statement: f.statement, facts: f.facts };
+      });
+  const items = [];
+
+  if (json?.executive_summary) {
+    items.push({ id: 'executive-summary', label: 'Executive summary', text: json.executive_summary, sources: [sheet] });
+  }
+  (json?.key_takeaways || []).slice(0, 5).forEach((t, i) => {
+    items.push({
+      id: `takeaway-${i + 1}`,
+      label: `Key takeaway ${i + 1}`,
+      text: t?.text,
+      findingIds: Array.isArray(t?.finding_ids) ? t.finding_ids : [],
+      sources: sourcesOf(t?.finding_ids),
     });
-
-    if (!res.ok) {
-      // Surface the API's own message, which distinguishes a bad key from a bad
-      // model name from a quota trip — but never echo the key back.
-      let detail = `HTTP ${res.status}`;
-      try {
-        const errBody = await res.json();
-        detail = errBody?.error?.message || detail;
-      } catch {
-        /* non-JSON error body */
-      }
-      return { ok: false, overloaded: OVERLOAD_STATUSES.has(res.status), reason: `${model}: ${detail}` };
-    }
-
-    const body = await res.json();
-    const candidate = body?.candidates?.[0];
-    const finish = candidate?.finishReason;
-
-    if (!candidate || (finish && finish !== 'STOP')) {
-      return {
-        ok: false,
-        reason: `${model} returned no usable output (finishReason: ${finish || 'none'})`,
-      };
-    }
-
-    const text = (candidate.content?.parts || []).map((p) => p.text || '').join('');
-    if (!text.trim()) return { ok: false, reason: `${model} returned an empty response` };
-    return { ok: true, text };
-  } catch (err) {
-    // A timeout is how an overloaded model usually fails; a dropped connection
-    // ("fetch failed") is treated the same.
-    const overloaded = err.name === 'TimeoutError' || err.name === 'TypeError';
-    const reason = err.name === 'TimeoutError' ? 'no response before the timeout' : err.message;
-    return { ok: false, overloaded, reason: `${model}: ${reason}` };
+  });
+  const seen = new Set();
+  for (const n of json?.chart_notes || []) {
+    if (!n?.chart || seen.has(n.chart)) continue;
+    seen.add(n.chart);
+    items.push({
+      id: `note-${n.chart}`,
+      label: `Note under ${CHART_DESCRIPTIONS[n.chart] || n.chart}`,
+      chart: n.chart,
+      text: n.text,
+      findingIds: Array.isArray(n.finding_ids) ? n.finding_ids : [],
+      sources: sourcesOf(n.finding_ids),
+    });
   }
+  return items;
+}
+
+/** Checked items -> report sections. Takeaways become one bulleted section. */
+function toSections(items) {
+  const sections = [];
+  const exec = items.find((i) => i.id === 'executive-summary');
+  if (exec) {
+    sections.push({ id: 'executive-summary', title: 'Executive Summary & Macro Performance', body: exec.text, source: 'ai' });
+  }
+  const takeaways = items.filter((i) => i.id.startsWith('takeaway-'));
+  if (takeaways.length) {
+    sections.push({
+      id: 'key-takeaways',
+      title: 'Key Takeaways',
+      body: takeaways.map((t) => `- ${t.text}`).join('\n'),
+      source: 'ai',
+    });
+  }
+  for (const n of items.filter((i) => i.chart)) {
+    sections.push({ id: n.id, title: 'What stands out', body: n.text, source: 'ai', chart: n.chart });
+  }
+  return sections;
 }
 
 /**
- * Generated prose. Never throws — returns `{ available:false, reason }` so the
- * caller can render the computed sections and note the omission.
+ * Generated commentary, fact-checked. Never throws — returns
+ * `{ available:false, reason }` so the caller can render the computed sections
+ * and note the omission.
  *
- * When a model is overloaded the next one in MODEL_CHAIN is tried, silently:
- * the report only records which model answered.
+ * @param {object} summary analyze() output
+ * @param {object} config report configuration
+ * @param {object[]} findings from buildFindings()
+ * @param {object} [options]
+ * @param {(stage: 'writing'|'checking', detail?: string) => void} [options.onStage]
+ *   progress callback, so the report page can show the fact check as its own step
+ * @returns {Promise<object>}
+ *   { available, reason?, model?, sections?, qa: { checked, kept, removed[], reviewer? } }
  */
 export async function generateInsights(
   summary,
   config = {},
-  { timeoutMs = ATTEMPT_TIMEOUT_MS, budgetMs = TOTAL_BUDGET_MS } = {}
+  findings = [],
+  { onStage = () => {}, budgetMs = TOTAL_BUDGET_MS } = {}
 ) {
-  if (!API_KEY) {
+  if (!llmConfigured()) {
     return { available: false, reason: 'No GOOGLE_API_KEY configured' };
   }
 
   try {
-    const prompt = buildPrompt(summary, config);
     const deadline = Date.now() + budgetMs;
+    const findingsById = new Map(findings.map((f) => [f.id, f]));
+    const charts = [...new Set(findings.map((f) => f.chart).filter(Boolean))];
 
-    let result;
-    let model;
-    const tried = [];
-    for (const [i, candidate] of MODEL_CHAIN.entries()) {
-      const remaining = deadline - Date.now();
-      if (i > 0 && remaining < 5000) break;
+    onStage('writing');
+    const written = await generateJson({
+      prompt: buildWriterPrompt(summary, config, findings),
+      schema: writerSchema(charts),
+      deadline,
+    });
+    if (!written.ok) return { available: false, reason: written.reason };
 
-      model = candidate;
-      tried.push(model);
-      result = await callModel(model, prompt, Math.min(timeoutMs, remaining));
-      if (result.ok || !result.overloaded) break;
+    onStage('checking');
+    const items = toItems(written.json, factSheet(summary, config), findingsById);
+    const code = mechanicalCheck(items, findingsById);
 
-      const next = MODEL_CHAIN[i + 1];
-      if (next) console.warn(`[llm] ${result.reason} — trying ${next}`);
+    if (deadline - Date.now() < MIN_REVIEW_MS) {
+      return { available: false, withheld: true, reason: 'No time was left to fact-check the commentary.' };
+    }
+    const review = await reviewWithModel(code.passed, { deadline });
+    if (!review.ok) {
+      return {
+        available: false,
+        withheld: true,
+        reason: `The fact check could not run (${review.reason}).`,
+      };
     }
 
-    if (!result.ok) {
-      const reason =
-        result.overloaded && tried.length > 1
-          ? `All ${tried.length} models were busy (${tried.join(', ')}). Last error: ${result.reason}`
-          : result.reason;
-      return { available: false, reason };
-    }
+    const removed = [...code.removed, ...review.removed];
+    for (const r of removed) console.warn(`[fact-check] removed ${r.id} (${r.stage}): ${r.reason}`);
 
-    const parsed = parseJsonLoosely(result.text);
     return {
       available: true,
-      model,
-      sections: [
-        {
-          id: 'executive-summary',
-          title: 'Executive Summary & Macro Performance',
-          body: parsed.executive_summary,
-          source: 'ai',
-        },
-        ...[1, 2, 3].map((i) => ({
-          id: `insight-${i}`,
-          title: parsed[`insight_${i}_title`],
-          body: parsed[`insight_${i}_text`],
-          source: 'ai',
-        })),
-      ],
+      model: written.model,
+      sections: toSections(review.passed),
+      qa: {
+        checked: items.length,
+        kept: review.passed.length,
+        removed,
+        reviewer: review.model,
+      },
     };
   } catch (err) {
     return { available: false, reason: err.message };
@@ -433,13 +409,13 @@ export async function generateInsights(
 }
 
 /**
- * The full ordered analysis: generated executive summary, the computed
- * analyses, then the generated insight points. Missing generated pieces simply
- * drop out.
+ * The analysis block in order: executive summary, key takeaways, then the
+ * computed analyses. Chart notes ride along at the end; the report places
+ * them under their charts. Missing generated pieces simply drop out.
  */
 export function assembleSections(computed, generated) {
   const ai = generated?.available ? generated.sections : [];
-  const exec = ai.filter((x) => x.id === 'executive-summary');
-  const points = ai.filter((x) => x.id !== 'executive-summary');
-  return [...exec, ...computed, ...points];
+  const lead = ai.filter((x) => x.id === 'executive-summary' || x.id === 'key-takeaways');
+  const notes = ai.filter((x) => x.chart);
+  return [...lead, ...computed, ...notes];
 }

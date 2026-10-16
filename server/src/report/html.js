@@ -25,7 +25,10 @@ import {
   crsRows,
   crsNotes,
   coverageNote,
+  outlierNote,
+  joinNotes,
   processStages,
+  CHART,
   DRAW_CATEGORY_LEAD,
   END_TO_END_NOTE,
   PROCESS_NOTE,
@@ -67,14 +70,31 @@ const tile = ({ label, value, unit, foot, featured = false }) => `
     ${foot ? `<div class="tile-foot">${esc(foot)}</div>` : ''}
   </div>`;
 
-const card = (title, desc, body, legend = '', note = '') => `
+const card = (title, desc, body, legend = '', note = '', insight = '') => `
   <section class="card">
     <h3>${esc(title)}</h3>
     ${desc ? `<p class="desc">${esc(desc)}</p>` : ''}
     ${body}
     ${legend}
     ${note ? `<p class="card-note">${esc(note)}</p>` : ''}
+    ${insight}
   </section>`;
+
+/** One analysis section: the Analysis block's cards and the notes under charts. */
+const sectionBlock = (sec, cls = 'an') => `<div class="${cls}">
+      <h4>${esc(sec.title)}${
+        sectionTagLabel(sec.source)
+          ? `<span class="tag">${esc(sectionTagLabel(sec.source))}</span>`
+          : ''
+      }</h4>
+      ${richText(sec.body, sec.title)}
+    </div>`;
+
+/** Looks up the AI note for a chart; most charts have none. */
+const insightLookup = (sections) => {
+  const byChart = new Map(sections.filter((x) => x.chart).map((x) => [x.chart, x]));
+  return (chart) => (byChart.has(chart) ? sectionBlock(byChart.get(chart), 'an inline') : '');
+};
 
 const legendOf = (items) => `
   <div class="legend">${items
@@ -101,7 +121,7 @@ function tilesSection(s) {
 }
 
 /** Milestones in the order the report spec defines, two of them derived. */
-function milestonesSection(s) {
+function milestonesSection(s, insightFor) {
   const rows = [
     ['Submission → AOR', s.daysSubmissionToAor],
     ['AOR → Medicals passed', s.daysAorToMeds],
@@ -126,11 +146,13 @@ function milestonesSection(s) {
       .join('')}
   </div>
   <p class="tile-note"><span class="tile-note-swatch"></span>${esc(END_TO_END_NOTE)}</p>
-  ${processSection(s)}`;
+  ${outlierNote(s, CHART.milestones) ? `<p class="card-note milestone-note">${esc(outlierNote(s, CHART.milestones))}</p>` : ''}
+  ${insightFor(CHART.milestones) ? `<div class="milestone-insight">${insightFor(CHART.milestones)}</div>` : ''}
+  ${processSection(s, insightFor)}`;
 }
 
 /** Same structure as web/src/components/ProcessLine.jsx. */
-function processSection(s) {
+function processSection(s, insightFor) {
   const { stages, refused, other } = processStages(s);
   if (!stages.length) return '';
   const stage = (st, tag = 'li', cls = 'stage') => `
@@ -148,29 +170,21 @@ function processSection(s) {
       ${stage(refused, 'div', 'stage process-aside')}
     </div>
     <p class="card-note">${esc(PROCESS_NOTE + otherNote)}</p>
+    ${insightFor(CHART.process)}
   </section>`;
 }
 
+/** The Analysis block. Chart notes are placed under their charts instead. */
 function analysisSection(sections) {
-  if (!sections.length) return '';
+  const own = sections.filter((sec) => !sec.chart);
+  if (!own.length) return '';
   return `<h2>Analysis</h2>
   <div class="analysis">
-    ${sections
-      .map(
-        (sec) => `<div class="an">
-      <h4>${esc(sec.title)}${
-        sectionTagLabel(sec.source)
-          ? `<span class="tag">${esc(sectionTagLabel(sec.source))}</span>`
-          : ''
-      }</h4>
-      ${richText(sec.body, sec.title)}
-    </div>`
-      )
-      .join('')}
+    ${own.map((sec) => sectionBlock(sec)).join('')}
   </div>`;
 }
 
-function chartsSection(s, config, P) {
+function chartsSection(s, config, P, insightFor) {
   const streamColor = (name) => P.series[STREAM_SLOT[name] ?? 0];
   const opts = { palette: P };
 
@@ -223,30 +237,32 @@ function chartsSection(s, config, P) {
   // one side empty, in which case its card is dropped.
   const crs = s.crsDistribution || {};
   const crsNote = crsNotes(crs);
-  const crsCard = (title, part, width, note) =>
+  const crsCard = (title, part, width, note, chart) =>
     part?.bands?.length
       ? card(
           title,
           `Cases per ${width}-point band · median ${fmt(part.median)}`,
           vBar(crsRows(part.bands), opts),
           '',
-          note
+          note,
+          insightFor(chart)
         )
       : '';
+  const excluded = (chart) => outlierNote(s, chart);
 
   return `
-  ${card('Stream breakdown', 'Share of cases by program category', donut(streams, opts), legendOf(streams.map((d) => ({ label: `${d.label} — ${fmt(d.value)}`, color: d.color }))))}
-  ${card('Application status', 'Where cases currently sit in the pipeline', hBar(statuses, { ...opts, gutter: 150 }))}
-  ${card('Top 10 countries of residence', 'Where applicants were living when they applied', hBar(countries, { ...opts, gutter: 170 }))}
-  ${card('Top 10 nationalities', 'Applicant nationality', hBar(nationalities, { ...opts, gutter: 170 }))}
-  ${card('Average Submission → PPR by stream', 'Mean elapsed days, coloured by stream', hBar(streamAvg, { ...opts, gutter: 130, suffix: 'd' }))}
-  ${card('Cases by draw category', 'Percentage of cases in each Express Entry draw category', hBar(drawShare, { ...opts, gutter: 210, suffix: '%' }), '', coverageNote(DRAW_CATEGORY_LEAD, s.drawCategorySpecified, total))}
-  ${card('Average processing time by draw category', 'Mean Submission → PPR of completed cases, busiest category first', hBar(drawTimes, { ...opts, gutter: 210, suffix: 'd' }), '', coverageNote(DRAW_CATEGORY_LEAD, drawTimesSpecified, s.daysSubmissionToPPR.count, 'completed cases'))}
-  ${card('Average processing time by nationality', 'Mean Submission → PPR for the 10 nationalities with the most completed cases', hBar(nationalityTimes, { ...opts, gutter: 170, suffix: 'd' }))}
-  ${crsCard('CRS score distribution — FSW & CEC', crs.general, 25, crsNote.general)}
-  ${crsCard('CRS score distribution — PNP', crs.pnp, 50, crsNote.pnp)}
-  ${card('Monthly submissions', 'Cases by month of submission', lineChart(monthly, { ...opts, gradientId: 'g-subs' }))}
-  ${card('Monthly processing times', 'Average Submission → PPR by month of submission', lineChart(monthlyTimes, { ...opts, suffix: 'd', gradientId: 'g-times' }))}
+  ${card('Stream breakdown', 'Share of cases by program category', donut(streams, opts), legendOf(streams.map((d) => ({ label: `${d.label} — ${fmt(d.value)}`, color: d.color }))), '', insightFor(CHART.streams))}
+  ${card('Application status', 'Where cases currently sit in the pipeline', hBar(statuses, { ...opts, gutter: 150 }), '', '', insightFor(CHART.status))}
+  ${card('Top 10 countries of residence', 'Where applicants were living when they applied', hBar(countries, { ...opts, gutter: 170 }), '', '', insightFor(CHART.countries))}
+  ${card('Top 10 nationalities', 'Applicant nationality', hBar(nationalities, { ...opts, gutter: 170 }), '', '', insightFor(CHART.nationalities))}
+  ${card('Average Submission → PPR by stream', 'Mean elapsed days, coloured by stream', hBar(streamAvg, { ...opts, gutter: 130, suffix: 'd' }), '', excluded(CHART.streamTimes), insightFor(CHART.streamTimes))}
+  ${card('Cases by draw category', 'Percentage of cases in each Express Entry draw category', hBar(drawShare, { ...opts, gutter: 210, suffix: '%' }), '', coverageNote(DRAW_CATEGORY_LEAD, s.drawCategorySpecified, total), insightFor(CHART.drawShare))}
+  ${card('Average processing time by draw category', 'Mean Submission → PPR of completed cases, busiest category first', hBar(drawTimes, { ...opts, gutter: 210, suffix: 'd' }), '', joinNotes(coverageNote(DRAW_CATEGORY_LEAD, drawTimesSpecified, s.daysSubmissionToPPR.count, 'completed cases'), excluded(CHART.drawTimes)), insightFor(CHART.drawTimes))}
+  ${card('Average processing time by nationality', 'Mean Submission → PPR for the 10 nationalities with the most completed cases', hBar(nationalityTimes, { ...opts, gutter: 170, suffix: 'd' }), '', excluded(CHART.nationalityTimes), insightFor(CHART.nationalityTimes))}
+  ${crsCard('CRS score distribution — FSW & CEC', crs.general, 25, crsNote.general, CHART.crsGeneral)}
+  ${crsCard('CRS score distribution — PNP', crs.pnp, 50, crsNote.pnp, CHART.crsPnp)}
+  ${card('Monthly submissions', 'Cases by month of submission', lineChart(monthly, { ...opts, gradientId: 'g-subs' }), '', '', insightFor(CHART.monthlySubmissions))}
+  ${card('Monthly processing times', 'Average Submission → PPR by month of submission', lineChart(monthlyTimes, { ...opts, suffix: 'd', gradientId: 'g-times' }), '', excluded(CHART.monthlyTimes), insightFor(CHART.monthlyTimes))}
   ${card(
     'Comparison of min & max processing times',
     'Longest and shortest Submission → PPR per program, within the selected period',
@@ -254,10 +270,12 @@ function chartsSection(s, config, P) {
     legendOf([
       { label: 'Longest case', color: P.series[1] },
       { label: 'Shortest case', color: P.series[0] },
-    ])
+    ]),
+    excluded(CHART.comparison),
+    insightFor(CHART.comparison)
   )}
-  ${card('5 slowest cases', 'Longest Submission → PPR durations', hBar(caseBars(s.slowestCases), { ...opts, gutter: 190, suffix: 'd' }))}
-  ${card('5 quickest cases', 'Shortest Submission → PPR durations', hBar(caseBars(s.quickestCases), { ...opts, gutter: 190, suffix: 'd' }))}`;
+  ${card('5 slowest cases', 'Longest Submission → PPR durations', hBar(caseBars(s.slowestCases), { ...opts, gutter: 190, suffix: 'd' }), '', excluded(CHART.slowest), insightFor(CHART.slowest))}
+  ${card('5 quickest cases', 'Shortest Submission → PPR durations', hBar(caseBars(s.quickestCases), { ...opts, gutter: 190, suffix: 'd' }), '', excluded(CHART.quickest), insightFor(CHART.quickest))}`;
 }
 
 /* ---------------- document ---------------- */
@@ -328,6 +346,11 @@ const styles = (P) => `
   .an ul{margin:4px 0 8px;padding-left:24px;font-size:16px;line-height:24px;color:${P.textSecondary}}
   .an ul:last-child{margin-bottom:0}
   .an li{margin:4px 0}
+  .an.inline{margin-top:16px;padding:12px 16px;background:${P.page}}
+  .an.inline h4{font-size:13px;line-height:20px}
+  .an.inline p,.an.inline ul{font-size:13px;line-height:20px}
+  .milestone-note{margin:0 0 16px}
+  .milestone-insight .an.inline{margin:0 0 24px}
   .tag{font-size:11px;line-height:16px;text-transform:uppercase;letter-spacing:.06em;font-weight:800;
     color:${P.textSecondary};background:${P.page};border:1px solid ${P.border};border-radius:999px;
     padding:4px 12px;margin-left:8px;vertical-align:middle}
@@ -356,6 +379,7 @@ const styles = (P) => `
  */
 export function renderReportHtml({ summary, sections = [], config = {}, notice = '' }) {
   const P = PALETTE;
+  const insightFor = insightLookup(sections);
 
   return `<!doctype html>
 <html lang="en">
@@ -371,10 +395,10 @@ export function renderReportHtml({ summary, sections = [], config = {}, notice =
 ${headerSection(config)}
 ${notice ? `<p class="note">${esc(notice)}</p>` : ''}
 ${tilesSection(summary)}
-${milestonesSection(summary)}
+${milestonesSection(summary, insightFor)}
 ${analysisSection(sections)}
 <h2>Charts</h2>
-${chartsSection(summary, config, P)}
+${chartsSection(summary, config, P, insightFor)}
 </div>
 </body>
 </html>`;

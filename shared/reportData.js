@@ -77,6 +77,67 @@ export function crsNotes(dist) {
   };
 }
 
+/**
+ * Stable ids for the report's charts. AI notes are attached to a chart by id,
+ * and the dashboard and the export both look them up here, so a note lands
+ * under the same chart in both.
+ */
+export const CHART = {
+  milestones: 'milestones',
+  process: 'process',
+  streams: 'stream-breakdown',
+  status: 'status',
+  countries: 'countries',
+  nationalities: 'nationalities',
+  streamTimes: 'stream-times',
+  drawShare: 'draw-share',
+  drawTimes: 'draw-times',
+  nationalityTimes: 'nationality-times',
+  crsGeneral: 'crs-general',
+  crsPnp: 'crs-pnp',
+  monthlySubmissions: 'monthly-submissions',
+  monthlyTimes: 'monthly-times',
+  comparison: 'comparison',
+  slowest: 'slowest-cases',
+  quickest: 'quickest-cases',
+};
+
+/** Charts built from processing times — the ones an excluded case changes. */
+const TIMING_CHARTS = new Set([
+  CHART.milestones,
+  CHART.streamTimes,
+  CHART.drawTimes,
+  CHART.nationalityTimes,
+  CHART.monthlyTimes,
+  CHART.comparison,
+]);
+
+const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many}`;
+
+/**
+ * Note for a chart whose figures leave out extreme cases (see
+ * server/src/pipeline/outliers.js). Empty when nothing was excluded or the
+ * chart is unaffected — the slowest-cases chart only cares about slow ones.
+ */
+export function outlierNote(s, chartId) {
+  const cases = s?.outliers?.cases || [];
+  const relevant = cases.filter((c) =>
+    TIMING_CHARTS.has(chartId) ||
+    (chartId === CHART.slowest && c.direction === 'slow') ||
+    (chartId === CHART.quickest && c.direction === 'fast')
+  );
+  if (!relevant.length) return '';
+  const detail = relevant
+    .slice(0, 3)
+    .map((c) => [`${fmt(c.days)} days`, c.stream, c.nationality].filter(Boolean).join(', '))
+    .join('; ');
+  const more = relevant.length > 3 ? `; and ${plural(relevant.length - 3, 'other', 'others')}` : '';
+  return `Excludes ${plural(relevant.length, 'extreme case', 'extreme cases')} (${detail}${more}) that would distort processing times.`;
+}
+
+/** Joins a chart's notes, skipping empty ones. */
+export const joinNotes = (...notes) => notes.filter(Boolean).join(' ');
+
 /** Submission → PPR moved into the milestones row; this is its explanation. */
 export const END_TO_END_NOTE = 'Total process';
 

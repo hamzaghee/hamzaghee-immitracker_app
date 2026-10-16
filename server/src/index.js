@@ -31,6 +31,7 @@ import {
   DEFAULT_DATE_FIELD,
 } from './pipeline/filter.js';
 import { analyze } from './pipeline/analyze.js';
+import { buildFindings } from './pipeline/findings.js';
 import {
   generateInsights,
   probeLlm,
@@ -134,7 +135,7 @@ function readWindow(query) {
  * verification checks and handy for debugging.
  * Accepts `from`/`to` and `stream` in addition to the rolling window.
  */
-function computeSummary(query) {
+function computeSummary(query, { excludeOutliers = false } = {}) {
   const { months, dateField } = readWindow(query);
   const datasetId = readDataset(query);
   const all = getRecords(datasetId);
@@ -143,7 +144,7 @@ function computeSummary(query) {
       ? filterByWindow(all, { from: query.from, to: query.to, dateField })
       : filterByWindow(all, { months, dateField });
   const filtered = query.stream ? filterByStream(byPeriod, query.stream) : byPeriod;
-  const summary = analyze(filtered);
+  const summary = analyze(filtered, { excludeOutliers });
 
   // How many records carry a usable date in this field at all, ignoring the
   // window. Surfaces how much of the dataset a given anchor can even reach.
@@ -163,6 +164,7 @@ function computeSummary(query) {
       generatedAt: new Date().toISOString(),
     },
     summary,
+    filtered,
   };
 }
 
@@ -366,7 +368,8 @@ app.delete('/api/datasets/:id', blockInDemo, (req, res, next) => {
 /** The main dashboard payload. */
 app.get('/api/summary', (req, res, next) => {
   try {
-    res.json(computeSummary(req.query));
+    const { meta, summary } = computeSummary(req.query);
+    res.json({ meta, summary });
   } catch (err) {
     next(err);
   }
@@ -433,7 +436,8 @@ app.get('/api/cases', (req, res, next) => {
  */
 app.get('/api/insights', costlyLimiters, async (req, res, next) => {
   try {
-    const { summary, meta } = computeSummary(req.query);
+    const { summary, meta, filtered } = computeSummary(req.query, { excludeOutliers: true });
+    const { findings } = buildFindings(filtered, summary);
     const config = {
       from: req.query.from,
       to: req.query.to,
@@ -441,10 +445,16 @@ app.get('/api/insights', costlyLimiters, async (req, res, next) => {
       streamLabel: req.query.stream ? streamGroupLabel(req.query.stream) : 'All Streams',
     };
     const computed = computedSections(summary, config);
-    const generated = await generateInsights(summary, config);
+    const generated = await generateInsights(summary, config, findings);
     res.json({
       meta,
-      generated: { available: generated.available, reason: generated.reason, model: generated.model },
+      findings,
+      generated: {
+        available: generated.available,
+        reason: generated.reason,
+        model: generated.model,
+        qa: generated.qa,
+      },
       sections: assembleSections(computed, generated),
     });
   } catch (err) {
