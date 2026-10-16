@@ -188,3 +188,44 @@ export function groupedBar(data, { width = 620, height = 240, suffix = 'd', pale
 
   return `<svg viewBox="0 0 ${width} ${padTop + height + labelH}" width="100%" height="${padTop + height + labelH}" role="img">${grid}${groups}</svg>`;
 }
+
+/**
+ * Vertical bars — the CRS histograms. data: [{ label, value }]
+ * Zero bars get no label: the gap itself is the information.
+ */
+export function vBar(data, { width = 620, height = 200, suffix = '', palette = PALETTE } = {}) {
+  const P = palette;
+  if (!data.length) return `<p class="empty">No data for this selection.</p>`;
+  const axisW = 46;
+  const padTop = 18;
+  const labelH = 52;
+  const plotW = Math.max(60, width - axisW - 16);
+  const { ticks, max } = niceTicks(Math.max(0, ...data.map((d) => d.value)));
+  const band = plotW / data.length;
+  const bw = Math.max(6, Math.min(36, band - 8));
+  const y = (v) => padTop + height - (max ? (v / max) * height : 0);
+  const baseY = padTop + height;
+
+  const grid = ticks
+    .map(
+      (t) =>
+        `<line x1="${axisW}" x2="${axisW + plotW}" y1="${y(t)}" y2="${y(t)}" stroke="${
+          t === 0 ? P.baseline : P.gridline
+        }" stroke-width="1"/>` + text(P, axisW - 8, y(t) + 4, fmt(t), 'end')
+    )
+    .join('');
+
+  const bars = data
+    .map((d, i) => {
+      const cx = axisW + i * band + band / 2;
+      const bh = baseY - y(d.value);
+      return (
+        `<path d="${barPath(cx - bw / 2, y(d.value), bw, bh, 4, 'top')}" fill="${d.color || P.series[0]}"/>` +
+        (d.value ? text(P, cx, y(d.value) - 6, `${fmt(d.value)}${suffix}`, 'middle', P.textSecondary) : '') +
+        text(P, cx, baseY + 16, d.label, 'end', P.textSecondary, ` transform="rotate(-35 ${cx} ${baseY + 16})"`)
+      );
+    })
+    .join('');
+
+  return `<svg viewBox="0 0 ${width} ${baseY + labelH}" width="100%" height="${baseY + labelH}" role="img">${grid}${bars}</svg>`;
+}

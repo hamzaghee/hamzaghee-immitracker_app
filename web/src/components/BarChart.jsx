@@ -36,7 +36,7 @@ export default function BarChart({
 
   if (!width) {
     const reserved =
-      orientation === 'horizontal' ? data.length * (barThickness + bandGap) + 30 : (height || 240) + 46;
+      orientation === 'horizontal' ? data.length * (barThickness + bandGap) + 30 : (height || 240) + 62;
     return <ChartPlaceholder innerRef={ref} height={reserved} />;
   }
 
@@ -115,7 +115,9 @@ export default function BarChart({
   const plotH = height || 240;
   const axisW = 42;
   const labelH = 46;
-  const h = plotH + labelH;
+  // Headroom for the value label over a bar that reaches the top tick.
+  const padTop = 16;
+  const h = padTop + plotH + labelH;
   const plotW = Math.max(60, width - axisW - 12);
   const band = data.length ? plotW / data.length : plotW;
   const bw = Math.max(6, Math.min(barThickness * 2, band - 8));
@@ -124,6 +126,7 @@ export default function BarChart({
   return (
     <div className="chart-wrap" ref={ref}>
       <svg className="chart" width={width} height={h} role="img">
+        <g transform={`translate(0 ${padTop})`}>
         {ticks.map((t) => (
           <g key={t}>
             <line
@@ -146,6 +149,17 @@ export default function BarChart({
           return (
             <g key={d.label}>
               <path d={barPath(x, plotH - bh, bw, bh, 4, 'top')} fill={d.color || color} />
+              {d.value ? (
+                <text
+                  className="value-label"
+                  x={x + bw / 2}
+                  y={plotH - bh - 5}
+                  textAnchor="middle"
+                >
+                  {fmt(d.value)}
+                  {valueSuffix}
+                </text>
+              ) : null}
               <text
                 className="cat-label"
                 x={axisW + i * band + band / 2}
@@ -171,6 +185,7 @@ export default function BarChart({
             </g>
           );
         })}
+        </g>
       </svg>
       <Tooltip tip={tip} />
     </div>

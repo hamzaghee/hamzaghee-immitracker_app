@@ -57,6 +57,73 @@ export const PROCESS_STAGES = [
   { status: 'Landed', label: 'Landed' },
 ];
 
+/** Provincial nomination adds this many CRS points. */
+const PNP_BONUS = 600;
+
+/**
+ * CRS scores counted into fixed-width bands, empty bands included so gaps in
+ * the distribution stay visible.
+ *
+ * @param {number[]} scores
+ * @param {number} width band width in points
+ * @param {number} [cap] scores at or above this go into one open "cap+" band
+ *   rather than stretching the axis with empty bands
+ * @returns {{ label: string, from: number, count: number }[]}
+ */
+export function crsBands(scores, width, cap = Infinity) {
+  if (!scores.length) return [];
+  const min = Math.min(...scores);
+  const max = Math.min(Math.max(...scores), cap - 1);
+  const bands = [];
+  for (let from = Math.floor(min / width) * width; from <= max; from += width) {
+    const to = Math.min(from + width, cap);
+    bands.push({
+      label: `${from}–${to - 1}`,
+      from,
+      count: scores.filter((s) => s >= from && s < to).length,
+    });
+  }
+  const above = scores.filter((s) => s >= cap).length;
+  if (above) bands.push({ label: `${cap}+`, from: cap, count: above });
+  return bands;
+}
+
+/**
+ * CRS distribution, split by whether the case is a provincial nominee.
+ *
+ * Nomination adds 600 points, so pooling PNP with everyone else puts a second
+ * hump past 900 and squeezes the rest of the curve. FSW/CEC get 25-point bands
+ * up to 600 with a single 600+ band for the rare outlier; PNP is sparser and
+ * spread across ~600 points, so it gets 50-point bands. Scores are shown as
+ * reported, not adjusted: some PNP applicants report a score below 600,
+ * apparently from before their nomination, and subtracting 600 would be wrong
+ * for them.
+ */
+function crsDistribution(records) {
+  const pnpStreams = new Set(STREAM_GROUPS.pnp.values);
+  const scoresOf = (rows) =>
+    rows.map((r) => parseFloat(r['CRS Score'])).filter((n) => isFinite(n) && n > 0);
+  const general = records.filter((r) => !pnpStreams.has(r['Stream']));
+  const pnp = records.filter((r) => pnpStreams.has(r['Stream']));
+  const generalScores = scoresOf(general);
+  const pnpScores = scoresOf(pnp);
+  return {
+    general: {
+      bands: crsBands(generalScores, 25, PNP_BONUS),
+      scored: generalScores.length,
+      total: general.length,
+      median: statsOf(generalScores).median,
+    },
+    pnp: {
+      bands: crsBands(pnpScores, 50),
+      scored: pnpScores.length,
+      total: pnp.length,
+      median: statsOf(pnpScores).median,
+      belowNomination: pnpScores.filter((s) => s < PNP_BONUS).length,
+    },
+  };
+}
+
 const sumValues = (obj) => Object.values(obj).reduce((s, v) => s + v, 0);
 
 /**
@@ -391,5 +458,6 @@ export function analyze(records, { comparisonRecords = records } = {}) {
     stageCounts,
     // Cases with a status outside the process line, or none at all.
     otherStatusCount: otherStatusCount + unknownStatusCount,
+    crsDistribution: crsDistribution(records),
   };
 }

@@ -26,6 +26,8 @@ import {
   shareRows,
   meanRows,
   nocRows,
+  crsRows,
+  crsNotes,
   coverageNote,
   DRAW_CATEGORY_LEAD,
   NOC_LEAD,
@@ -296,6 +298,31 @@ export default function App() {
   const nationalityTimes = meanRows(s.processingByNationality, s.countryNames);
   const nocs = nocRows(s.topNocCodes);
   const nocNote = coverageNote(NOC_LEAD, s.nocSpecified, s.totalRecordsAnalyzed);
+  const crs = s.crsDistribution || {};
+  const crsGeneral = crsRows(crs.general?.bands);
+  const crsPnp = crsRows(crs.pnp?.bands);
+  const crsNote = crsNotes(crs);
+  const crsCols = [
+    { key: 'label', label: 'CRS band' },
+    { key: 'value', label: 'Cases', num: true },
+  ];
+  // A stream filter can leave one side empty (e.g. a PNP-only report).
+  const crsCards = [
+    crsGeneral.length && {
+      key: 'general',
+      title: 'CRS score distribution — FSW & CEC',
+      desc: `Cases per 25-point band · median ${fmt(crs.general.median)}`,
+      rows: crsGeneral,
+      note: crsNote.general,
+    },
+    crsPnp.length && {
+      key: 'pnp',
+      title: 'CRS score distribution — PNP',
+      desc: `Cases per 50-point band · median ${fmt(crs.pnp.median)}`,
+      rows: crsPnp,
+      note: crsNote.pnp,
+    },
+  ].filter(Boolean);
 
   const shareCols = (label) => [
     { key: 'label', label },
@@ -513,6 +540,23 @@ export default function App() {
       >
         <BarChart data={nocs} gutter={90} />
       </ChartCard>
+
+      {crsCards.length ? (
+        <div className={crsCards.length > 1 ? 'grid two' : 'grid'} style={{ marginTop: '1.25rem' }}>
+          {crsCards.map((c) => (
+            <ChartCard
+              key={c.key}
+              title={c.title}
+              desc={c.desc}
+              note={c.note}
+              columns={crsCols}
+              rows={c.rows.map((d) => ({ ...d, key: d.label }))}
+            >
+              <BarChart data={c.rows} orientation="vertical" height={200} />
+            </ChartCard>
+          ))}
+        </div>
+      ) : null}
 
       <div className="grid two" style={{ marginTop: '1.25rem' }}>
         <ChartCard
