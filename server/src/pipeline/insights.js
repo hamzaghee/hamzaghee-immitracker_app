@@ -36,16 +36,53 @@ const API_KEY = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '';
 const normaliseModel = (m) => String(m || '').replace(/^models\//, '').trim();
 
 /**
- * Measured on this API against the real report prompt:
+ * Measured on this API against the real report prompt and schema, 7 runs each
+ * (October 2026):
  *
- *   gemma-4-31b-it        200 in ~10s, full schema, clean prose   <- default
- *   gemma-4-26b-a4b-it    hangs; no response in 90s, repeatedly
- *   gemini-flash-latest   works (~11s) but intermittently 503s under load
- *   gemini-2.5-flash      404, no longer available to new keys
+ *   gemini-flash-lite-latest  7/7, ~4s                     <- default
+ *   gemini-3.5-flash-lite     6/7, ~4s                     <- fallback 1
+ *   gemini-3.1-flash-lite     4/7, ~2s, otherwise 503      <- fallback 2
+ *   gemini-3.7-flash          2/7, ~110s, otherwise 503    <- fallback 3
+ *   gemma-4-31b-it            0/7, 500 / 503 throughout
+ *   gemini-flash-latest       1/7, 503 or timeout
+ *   gemini-2.5-*              404, no longer available to new keys
+ *   gemini-pro-latest         429, no free-tier quota
  *
  * Override with LLM_MODEL; a "models/" prefix is accepted.
  */
-const LLM_MODEL = normaliseModel(process.env.LLM_MODEL) || 'gemma-4-31b-it';
+const LLM_MODEL = normaliseModel(process.env.LLM_MODEL) || 'gemini-flash-lite-latest';
+
+/**
+ * Models tried in order when the one before is overloaded. Override with a
+ * comma-separated LLM_FALLBACK_MODELS; set it empty to disable fallback. The
+ * primary is never repeated, and at most three fallbacks are used.
+ */
+const MAX_FALLBACKS = 3;
+const FALLBACK_MODELS = [
+  ...new Set(
+    (process.env.LLM_FALLBACK_MODELS ?? 'gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3.7-flash')
+      .split(',')
+      .map(normaliseModel)
+      .filter((m) => m && m !== LLM_MODEL)
+  ),
+].slice(0, MAX_FALLBACKS);
+const MODEL_CHAIN = [LLM_MODEL, ...FALLBACK_MODELS];
+
+/**
+ * Overload signals — the only failures worth moving to the next model on. A
+ * bad key (400/403) or retired model (404) fails the same way everywhere, so
+ * those return at once rather than hiding a configuration error behind the
+ * fallbacks.
+ */
+const OVERLOAD_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+/**
+ * Per-attempt and whole-call limits. Healthy responses arrive in seconds; an
+ * overloaded model tends to hang until the timeout, so a full two minutes per
+ * attempt across four models would stall the report for eight.
+ */
+const ATTEMPT_TIMEOUT_MS = 60000;
+const TOTAL_BUDGET_MS = 180000;
 
 /**
  * Send `responseSchema` alongside the JSON mime type.
@@ -241,6 +278,7 @@ export function probeLlm() {
     available: Boolean(API_KEY),
     provider: 'google-generative-language',
     model: LLM_MODEL,
+    fallbackModels: FALLBACK_MODELS,
     reason: API_KEY ? undefined : 'GOOGLE_API_KEY is not set',
   };
 }
@@ -267,37 +305,28 @@ function parseJsonLoosely(text) {
 }
 
 /**
- * Generated prose. Never throws — returns `{ available:false, reason }` so the
- * caller can render the computed sections and note the omission.
+ * One generateContent call. Never throws. `overloaded` marks the failures that
+ * justify trying the next model.
  */
-export async function generateInsights(summary, config = {}, { timeoutMs = 120000 } = {}) {
-  if (!API_KEY) {
-    return { available: false, reason: 'No GOOGLE_API_KEY configured' };
-  }
-
+async function callModel(model, prompt, timeoutMs) {
   try {
-    const generationConfig = {
-      temperature: 0,
-      responseMimeType: 'application/json',
-      ...(USE_SCHEMA ? { responseSchema: schema } : {}),
-    };
-
-    const res = await fetch(
-      `${API_BASE}/models/${encodeURIComponent(LLM_MODEL)}:generateContent`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Header rather than ?key= so the secret stays out of any URL log.
-          'x-goog-api-key': API_KEY,
+    const res = await fetch(`${API_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Header rather than ?key= so the secret stays out of any URL log.
+        'x-goog-api-key': API_KEY,
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: 'application/json',
+          ...(USE_SCHEMA ? { responseSchema: schema } : {}),
         },
-        signal: AbortSignal.timeout(timeoutMs),
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: buildPrompt(summary, config) }] }],
-          generationConfig,
-        }),
-      }
-    );
+      }),
+    });
 
     if (!res.ok) {
       // Surface the API's own message, which distinguishes a bad key from a bad
@@ -309,7 +338,7 @@ export async function generateInsights(summary, config = {}, { timeoutMs = 12000
       } catch {
         /* non-JSON error body */
       }
-      return { available: false, reason: `${LLM_MODEL}: ${detail}` };
+      return { ok: false, overloaded: OVERLOAD_STATUSES.has(res.status), reason: `${model}: ${detail}` };
     }
 
     const body = await res.json();
@@ -318,18 +347,71 @@ export async function generateInsights(summary, config = {}, { timeoutMs = 12000
 
     if (!candidate || (finish && finish !== 'STOP')) {
       return {
-        available: false,
-        reason: `${LLM_MODEL} returned no usable output (finishReason: ${finish || 'none'})`,
+        ok: false,
+        reason: `${model} returned no usable output (finishReason: ${finish || 'none'})`,
       };
     }
 
     const text = (candidate.content?.parts || []).map((p) => p.text || '').join('');
-    if (!text.trim()) return { available: false, reason: `${LLM_MODEL} returned an empty response` };
+    if (!text.trim()) return { ok: false, reason: `${model} returned an empty response` };
+    return { ok: true, text };
+  } catch (err) {
+    // A timeout is how an overloaded model usually fails; a dropped connection
+    // ("fetch failed") is treated the same.
+    const overloaded = err.name === 'TimeoutError' || err.name === 'TypeError';
+    const reason = err.name === 'TimeoutError' ? 'no response before the timeout' : err.message;
+    return { ok: false, overloaded, reason: `${model}: ${reason}` };
+  }
+}
 
-    const parsed = parseJsonLoosely(text);
+/**
+ * Generated prose. Never throws — returns `{ available:false, reason }` so the
+ * caller can render the computed sections and note the omission.
+ *
+ * When a model is overloaded the next one in MODEL_CHAIN is tried, silently:
+ * the report only records which model answered.
+ */
+export async function generateInsights(
+  summary,
+  config = {},
+  { timeoutMs = ATTEMPT_TIMEOUT_MS, budgetMs = TOTAL_BUDGET_MS } = {}
+) {
+  if (!API_KEY) {
+    return { available: false, reason: 'No GOOGLE_API_KEY configured' };
+  }
+
+  try {
+    const prompt = buildPrompt(summary, config);
+    const deadline = Date.now() + budgetMs;
+
+    let result;
+    let model;
+    const tried = [];
+    for (const [i, candidate] of MODEL_CHAIN.entries()) {
+      const remaining = deadline - Date.now();
+      if (i > 0 && remaining < 5000) break;
+
+      model = candidate;
+      tried.push(model);
+      result = await callModel(model, prompt, Math.min(timeoutMs, remaining));
+      if (result.ok || !result.overloaded) break;
+
+      const next = MODEL_CHAIN[i + 1];
+      if (next) console.warn(`[llm] ${result.reason} — trying ${next}`);
+    }
+
+    if (!result.ok) {
+      const reason =
+        result.overloaded && tried.length > 1
+          ? `All ${tried.length} models were busy (${tried.join(', ')}). Last error: ${result.reason}`
+          : result.reason;
+      return { available: false, reason };
+    }
+
+    const parsed = parseJsonLoosely(result.text);
     return {
       available: true,
-      model: LLM_MODEL,
+      model,
       sections: [
         {
           id: 'executive-summary',

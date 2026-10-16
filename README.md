@@ -91,7 +91,8 @@ workload.
 | `APP_MODE` | `demo` or `production` (default) |
 | `APP_PASSWORD`, `SESSION_SECRET` | required in production |
 | `GOOGLE_API_KEY` | Generative Language API key; without it the report still renders, minus the written commentary |
-| `LLM_MODEL` | default `gemma-4-31b-it`; a `models/` prefix is accepted |
+| `LLM_MODEL` | default `gemini-flash-lite-latest`; a `models/` prefix is accepted |
+| `LLM_FALLBACK_MODELS` | comma-separated models tried in order when the one before is overloaded; at most three; empty disables — see below |
 | `LLM_USE_SCHEMA=0` | escape hatch only; Gemma **requires** the schema — see below |
 | `TRUST_PROXY` | set to `1` behind a proxy, or the rate limiter treats every visitor as one client |
 | `PUPPETEER_NO_SANDBOX` | set to `1` on Railway and most containers — see the sandbox note below |
@@ -170,16 +171,27 @@ Further environment: `DATA_PATH`, `UPLOAD_DIR`, `MAX_UPLOAD_MB` (default 250),
 
 ## Choosing a model
 
-Measured against this API with the real report prompt:
+Measured against this API with the real report prompt and schema, 7 runs each
+(October 2026):
 
 | Model | Result |
 |---|---|
-| `gemma-4-31b-it` | 200 in ~10s, full schema, clean prose — **the default** |
-| `gemma-4-26b-a4b-it` | hangs; no response in 90s, reproducibly |
-| `gemini-flash-latest` | works (~11s) but intermittently returns 503 under load |
-| `gemini-2.5-flash` | 404 — no longer available to new keys |
+| `gemini-flash-lite-latest` | 7/7, ~4s — **the default** |
+| `gemini-3.5-flash-lite` | 6/7, ~4s — fallback 1 |
+| `gemini-3.1-flash-lite` | 4/7, ~2s, otherwise 503 — fallback 2 |
+| `gemini-3.7-flash` | 2/7, ~110s, otherwise 503 or timeout — fallback 3 |
+| `gemini-flash-latest` | 1/7; 503 or timeout |
+| `gemma-4-31b-it`, `gemma-4-26b-a4b-it` | 0/7; 500, 503 or timeout throughout |
+| `gemini-pro-latest` | 429 — no free-tier quota |
+| `gemini-2.5-flash`, `-flash-lite`, `-pro` | 404 — no longer available to new keys |
 
-Two things worth knowing:
+When a model is overloaded — 429, 5xx, or no response within 60s — the next
+one in the chain is tried without any message to the user; the report's
+progress step records which model answered. The whole chain is capped at three
+minutes. Other failures (bad key, retired model, malformed output) stop at
+once, so a configuration error is not hidden behind the fallbacks.
+
+Three things worth knowing:
 
 - **Gemma requires `responseSchema`.** With `responseMimeType` alone it returns
   its reasoning as prose instead of JSON and the parse fails. This is the
@@ -187,6 +199,10 @@ Two things worth knowing:
 - **Model ids churn.** Pinned versions get retired and return 404. If generation
   starts failing, list what your key can actually see:
   `curl -H "x-goog-api-key: $KEY" https://generativelanguage.googleapis.com/v1beta/models`
+- **`-latest` ids are aliases.** `gemini-flash-lite-latest` follows Google's
+  newest Flash-Lite release, so it is not retired the way pinned ids are, but
+  its output can shift when Google repoints it. Set `LLM_MODEL` to a pinned id
+  such as `gemini-3.5-flash-lite` if consistency matters more.
 
 Whatever happens here, the report still renders — the written commentary is the
 only part that depends on the model.
