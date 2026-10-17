@@ -11,6 +11,9 @@ function isoMonthsAgo(monthsAgo) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+/** "an Express Entry", "a Citizenship" */
+const withArticle = (label) => `${/^[aeiou]/i.test(label || '') ? 'an' : 'a'} ${label}`;
+
 /** Quick period presets. 18 months matches the original n8n window. */
 const PRESETS = [
   { months: 3, label: '3m' },
@@ -19,11 +22,23 @@ const PRESETS = [
   { months: 18, label: '18m' },
 ];
 
+/** The date each report type's period filters on. */
+const PERIOD_FIELD = {
+  'express-entry': 'Submitted',
+  citizenship: 'Application Sent',
+};
+
 /**
  * Report Configuration — the app's entry screen.
  *
- * Report type drives what else appears: the Stream field is Express Entry only.
- * The period filters on the Submitted date, matching the report spec.
+ * Report type drives what else appears: Express Entry filters by stream,
+ * Citizenship by application type and province. The period filters on the
+ * Submitted date for Express Entry and the Application Sent date for
+ * Citizenship.
+ *
+ * Each dataset comes from one tracker, and a report type only runs on its own
+ * tracker's export. So choosing a report type picks a matching dataset, and a
+ * new or newly selected dataset switches the report type to match it.
  */
 export default function ReportConfig({
   options,
@@ -38,6 +53,8 @@ export default function ReportConfig({
 }) {
   const [reportType, setReportType] = useState('express-entry');
   const [stream, setStream] = useState('all');
+  const [applicationType, setApplicationType] = useState('all');
+  const [province, setProvince] = useState('all');
   const [from, setFrom] = useState(() => isoMonthsAgo(18));
   const [to, setTo] = useState(() => today());
 
@@ -57,18 +74,47 @@ export default function ReportConfig({
   const streams = options?.streams || [];
   const selectedType = types.find((t) => t.value === reportType);
   const isExpressEntry = reportType === 'express-entry';
+  const isCitizenship = reportType === 'citizenship';
   const available = selectedType?.available !== false;
+  const activeDataset = datasets.find((d) => d.id === dataset);
   const hasDataset = Boolean(dataset);
+  // Datasets from before tracker detection report no tracker; all were Express Entry.
+  const trackerOf = (d) => d?.tracker || 'express-entry';
+  const mismatch = Boolean(activeDataset && selectedType?.tracker && trackerOf(activeDataset) !== selectedType.tracker);
   const periodValid = !from || !to || from <= to;
-  const canSubmit = available && hasDataset && periodValid && !busy;
+  const canSubmit = available && hasDataset && !mismatch && periodValid && !busy;
 
-  // Stream only applies to Express Entry; reset it when switching away so a
-  // stale selection can't leak into a future report type.
+  // Filters only apply to their own report type; reset them when switching
+  // away so a stale selection can't leak into another report.
   useEffect(() => {
     if (!isExpressEntry) setStream('all');
-  }, [isExpressEntry]);
+    if (!isCitizenship) {
+      setApplicationType('all');
+      setProvince('all');
+    }
+  }, [isExpressEntry, isCitizenship]);
 
-  const activeDataset = datasets.find((d) => d.id === dataset);
+  // A dataset chosen or uploaded switches the report type to the one it can
+  // produce. Keyed on the dataset only, so picking a type with no matching
+  // dataset leaves that choice alone and shows the mismatch message instead.
+  useEffect(() => {
+    if (!activeDataset) return;
+    const match = types.find((t) => t.available && t.tracker === trackerOf(activeDataset));
+    if (match) setReportType(match.value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataset, activeDataset?.tracker, types.length]);
+
+  /** Choosing a report type also picks a dataset it can run on, if there is one. */
+  function chooseType(value) {
+    setReportType(value);
+    const want = types.find((t) => t.value === value)?.tracker;
+    if (want && activeDataset && trackerOf(activeDataset) !== want) {
+      const match = datasets.find((d) => trackerOf(d) === want);
+      if (match) onSelectDataset(match.id);
+    }
+  }
+
+  const typeLabel = (tracker) => types.find((t) => t.tracker === tracker)?.label || tracker;
 
   return (
     <div className="config">
@@ -80,7 +126,7 @@ export default function ReportConfig({
           <select
             id="reportType"
             value={reportType}
-            onChange={(e) => setReportType(e.target.value)}
+            onChange={(e) => chooseType(e.target.value)}
             disabled={busy}
           >
             {types.map((t) => (
@@ -104,13 +150,45 @@ export default function ReportConfig({
             </select>
           </div>
         ) : null}
+
+        {isCitizenship ? (
+          <>
+            <div className="field">
+              <label htmlFor="applicationType">Application type</label>
+              <select
+                id="applicationType"
+                value={applicationType}
+                onChange={(e) => setApplicationType(e.target.value)}
+                disabled={busy}
+              >
+                {(options?.applicationTypes || []).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="province">Province</label>
+              <select id="province" value={province} onChange={(e) => setProvince(e.target.value)} disabled={busy}>
+                {(options?.provinces || []).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        ) : null}
       </div>
 
       {available ? (
         <>
           <fieldset className="period">
             <legend>Time period</legend>
-            <p className="hint">Filters on the case&rsquo;s <em>Submitted</em> date.</p>
+            <p className="hint">
+              Filters on the case&rsquo;s <em>{PERIOD_FIELD[reportType] || 'Submitted'}</em> date.
+            </p>
 
             <div className="presets" role="group" aria-label="Quick period">
               {PRESETS.map((p) => (
@@ -155,12 +233,19 @@ export default function ReportConfig({
               onChanged={onDatasetsChanged}
               readOnly={readOnly}
             />
+            {mismatch ? (
+              <p className="dataset-msg warn">
+                This dataset is {typeLabel(trackerOf(activeDataset))} tracker data, so it cannot produce{' '}
+                {withArticle(selectedType?.label)} report. Choose {typeLabel(trackerOf(activeDataset))} as the
+                report type, or upload {withArticle(selectedType?.label)} tracker export.
+              </p>
+            ) : null}
           </fieldset>
         </>
       ) : (
         <p className="coming-soon">
           <strong>{selectedType?.label} reports are not available yet.</strong> This build covers
-          Express Entry only — that programme&rsquo;s tracker is the one this export contains.
+          Express Entry and Citizenship.
         </p>
       )}
 
@@ -170,7 +255,15 @@ export default function ReportConfig({
         <button
           className="primary"
           disabled={!canSubmit}
-          onClick={() => onSubmit({ reportType, stream, from: from || undefined, to: to || undefined, datasetId: dataset })}
+          onClick={() =>
+            onSubmit({
+              reportType,
+              ...(isCitizenship ? { applicationType, province } : { stream }),
+              from: from || undefined,
+              to: to || undefined,
+              datasetId: dataset,
+            })
+          }
         >
           {busy ? 'Starting…' : 'Next'}
         </button>

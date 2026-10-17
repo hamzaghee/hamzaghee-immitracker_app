@@ -18,9 +18,12 @@ const Stage = ({ stage, as: Tag = 'li', className = 'stage' }) => (
  * Marker area scales with the count so the bottlenecks read at a glance; the
  * number underneath carries the exact value. The export draws the same thing
  * from the same `processStages()` data.
+ *
+ * Express Entry by default; Citizenship passes its own `data` (no Refused
+ * marker) and `note`.
  */
-export default function ProcessLine({ summary, insight }) {
-  const { stages, refused, other } = processStages(summary);
+export default function ProcessLine({ summary, insight, data, note = PROCESS_NOTE }) {
+  const { stages, refused, other } = data || processStages(summary);
   if (!stages.length) return null;
 
   return (
@@ -32,10 +35,10 @@ export default function ProcessLine({ summary, insight }) {
             <Stage key={st.status} stage={st} />
           ))}
         </ol>
-        <Stage stage={refused} as="div" className="stage process-aside" />
+        {refused ? <Stage stage={refused} as="div" className="stage process-aside" /> : null}
       </div>
       <p className="card-note">
-        {PROCESS_NOTE}
+        {note}
         {other ? ` ${fmt(other)} cases have another or no status and are not shown.` : ''}
       </p>
       {insight}

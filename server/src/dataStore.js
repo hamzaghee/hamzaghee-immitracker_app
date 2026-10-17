@@ -20,7 +20,35 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { relabelRows } from './pipeline/relabel.js';
 import { fieldToLabel } from './pipeline/fieldMap.js';
+import { relabelCitizenship } from './pipeline/citizenship/relabel.js';
+import { citizenshipFieldToLabel } from './pipeline/citizenship/fieldMap.js';
+import { detectTracker } from './pipeline/citizenship/detect.js';
 import { isDemo } from './config.js';
+
+/**
+ * What differs per tracker: its field dictionary, its relabel step, and the
+ * one field the pipeline cannot work without. The tracker is detected from the
+ * field ids on upload and stored with the dataset, and each report type only
+ * runs on datasets of its own tracker.
+ */
+const TRACKERS = {
+  'express-entry': {
+    fields: fieldToLabel,
+    relabel: relabelRows,
+    statusField: 'xopos-kybed-picys-supot-gukab-tetyl-luzyd-lekez-gixex',
+  },
+  citizenship: {
+    fields: citizenshipFieldToLabel,
+    relabel: relabelCitizenship,
+    statusField: 'xekim-tabom-koguk-liven-mepis-fegyc-fufyt-kanac-foxex',
+  },
+};
+
+/**
+ * Uploads from before tracker detection carry no tracker in their metadata;
+ * every one of them was an Express Entry export.
+ */
+const DEFAULT_TRACKER = 'express-entry';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '../..');
@@ -43,10 +71,11 @@ const datasets = new Map();
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 /**
- * Validates that a parsed payload looks like an Immitracker export and reports
- * how many of the 32 known field ids it actually contains. Low coverage means
- * the labels — and therefore every chart — will be mostly empty, which is worth
- * telling the user before they wonder why the dashboard is blank.
+ * Validates that a parsed payload looks like an Immitracker export, works out
+ * which tracker it came from, and reports how many of that tracker's known
+ * field ids it actually contains. Low coverage means the labels — and
+ * therefore every chart — will be mostly empty, which is worth telling the
+ * user before they wonder why the dashboard is blank.
  */
 export function inspectPayload(parsed) {
   const rows = Array.isArray(parsed) ? parsed : parsed?.data || parsed?.records;
@@ -70,25 +99,38 @@ export function inspectPayload(parsed) {
   const target = 500;
   const stride = Math.max(1, Math.floor(rows.length / target));
   const seen = new Set();
+  const sample = [];
   for (let i = 0; i < rows.length; i += stride) {
     const r = rows[i];
-    if (r && typeof r === 'object') for (const k of Object.keys(r)) seen.add(k);
+    if (r && typeof r === 'object') {
+      sample.push(r);
+      for (const k of Object.keys(r)) seen.add(k);
+    }
   }
 
-  const known = Object.keys(fieldToLabel);
+  // A file with no known field id at all is still accepted (with a warning),
+  // and read as Express Entry, as it always was.
+  const tracker = detectTracker(sample).tracker || DEFAULT_TRACKER;
+  const known = Object.keys(TRACKERS[tracker].fields);
   const matched = known.filter((k) => seen.has(k));
 
   return {
     rows,
     coverage: {
+      tracker,
       knownFields: known.length,
       matchedFields: matched.length,
-      // The pipeline keys everything off these two; without them nothing works.
-      hasStream: seen.has('xidar-kiboc-feruv-vazum-dazul-noror-kemip-pagit-fixix'),
-      hasStatus: seen.has('xopos-kybed-picys-supot-gukab-tetyl-luzyd-lekez-gixex'),
+      // The pipeline keys everything off these; without them nothing works.
+      // Citizenship has no streams.
+      hasStream:
+        tracker === 'express-entry' ? seen.has('xidar-kiboc-feruv-vazum-dazul-noror-kemip-pagit-fixix') : null,
+      hasStatus: seen.has(TRACKERS[tracker].statusField),
     },
   };
 }
+
+/** Which tracker a dataset came from. */
+const trackerOf = (entry) => entry.coverage?.tracker || DEFAULT_TRACKER;
 
 /** Drops cached records from the least-recently-used datasets. */
 function evictIfNeeded() {
@@ -109,7 +151,7 @@ function readAndRelabel(entry) {
   const { rows, coverage } = inspectPayload(parsed);
   entry.sourceCount = rows.length;
   entry.coverage = coverage;
-  entry.records = relabelRows(rows);
+  entry.records = TRACKERS[coverage.tracker].relabel(rows);
   entry.loadMs = Date.now() - started;
   console.log(`[data] loaded "${entry.name}" — ${rows.length} records in ${entry.loadMs}ms`);
   return entry;
@@ -161,33 +203,30 @@ export function init() {
 }
 
 export const DEMO_DATASET_ID = 'demo-sample';
+export const DEMO_CITIZENSHIP_DATASET_ID = 'demo-citizenship-sample';
 
 /**
- * Loads the synthetic dataset the demo runs on.
+ * Loads the synthetic datasets the demo runs on, one per tracker.
  *
- * Marked `protected` so it cannot be deleted: without that, the first visitor to
- * press Remove would leave the demo permanently empty for everyone after them.
- * The file is committed to the repo and contains no real applicant data.
+ * Marked `protected` so they cannot be deleted: without that, the first visitor
+ * to press Remove would leave the demo permanently empty for everyone after
+ * them. The files are committed to the repo and contain no real applicant data.
  */
 function seedDemoDataset() {
-  const filePath = path.resolve(__dirname, '../demo/sample-dataset.json');
-  if (!fs.existsSync(filePath)) {
-    console.warn(`[data] demo mode, but no sample dataset at ${filePath}`);
-    return;
+  const samples = [
+    { id: DEMO_DATASET_ID, file: 'sample-dataset.json', name: 'Sample dataset (synthetic)' },
+    { id: DEMO_CITIZENSHIP_DATASET_ID, file: 'citizenship-sample-dataset.json', name: 'Sample dataset (synthetic)' },
+  ];
+  for (const { id, file, name } of samples) {
+    const filePath = path.resolve(__dirname, '../demo', file);
+    if (!fs.existsSync(filePath)) {
+      console.warn(`[data] demo mode, but no sample dataset at ${filePath}`);
+      continue;
+    }
+    datasets.set(id, { id, name, filePath, uploadedAt: null, protected: true, records: null, lastUsed: 0 });
+    getRecords(id); // warm it so the first visitor waits on nothing
   }
-
-  datasets.set(DEMO_DATASET_ID, {
-    id: DEMO_DATASET_ID,
-    name: 'Sample dataset (synthetic)',
-    filePath,
-    uploadedAt: null,
-    protected: true,
-    records: null,
-    lastUsed: 0,
-  });
-
-  getRecords(DEMO_DATASET_ID); // warm it so the first visitor waits on nothing
-  console.log('[data] demo mode — synthetic sample dataset loaded, uploads disabled');
+  console.log('[data] demo mode — synthetic sample datasets loaded, uploads disabled');
 }
 
 /**
@@ -239,12 +278,12 @@ export function addUpload({ tempPath, originalName }) {
       uploadedAt,
       sourceCount: rows.length,
       coverage,
-      records: relabelRows(rows),
+      records: TRACKERS[coverage.tracker].relabel(rows),
       lastUsed: Date.now(),
     };
     datasets.set(id, entry);
     evictIfNeeded();
-    console.log(`[data] uploaded "${originalName}" as ${id} — ${rows.length} records`);
+    console.log(`[data] uploaded "${originalName}" as ${id} — ${rows.length} ${coverage.tracker} records`);
     return describe(entry);
   } catch (err) {
     fs.rmSync(tempPath, { force: true });
@@ -294,8 +333,16 @@ const describe = (d) => ({
   uploadedAt: d.uploadedAt,
   sourceCount: d.sourceCount ?? null,
   coverage: d.coverage ?? null,
+  tracker: trackerOf(d),
   cached: !!d.records,
 });
+
+/** The tracker a dataset came from: 'express-entry' or 'citizenship'. */
+export function datasetTracker(id) {
+  const entry = datasets.get(id);
+  if (!entry) throw Object.assign(new Error(`Unknown dataset: ${id}`), { status: 404 });
+  return trackerOf(entry);
+}
 
 /** Newest upload first, so the most recent is the natural default. */
 export const listDatasets = () =>

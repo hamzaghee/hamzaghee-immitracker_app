@@ -261,7 +261,8 @@ const reviewSchema = {
   required: ['reviews'],
 };
 
-export function buildReviewPrompt(items) {
+/** `glossary` is the report's own term list as prompt text; Express Entry's by default. */
+export function buildReviewPrompt(items, glossary = glossaryText()) {
   const payload = items.map((i) => ({ id: i.id, text: i.text, source: i.sources }));
   return `You are a strict fact-checker for a report on Canadian immigration processing times.
 You did not write the text below. Your only job is to decide whether each item is supported by its source.
@@ -281,7 +282,7 @@ Otherwise mark it "fail". Write the reason first: check each point above against
 Review every item, and use each item's id exactly as given.
 
 GLOSSARY:
-${glossaryText()}
+${glossary}
 
 ITEMS:
 ${JSON.stringify(payload, null, 2)}`;
@@ -292,10 +293,10 @@ ${JSON.stringify(payload, null, 2)}`;
  *
  * @returns {Promise<{ok:true, model:string, passed:object[], removed:object[]} | {ok:false, reason:string}>}
  */
-export async function reviewWithModel(items, { deadline }) {
+export async function reviewWithModel(items, { deadline, glossary } = {}) {
   if (!items.length) return { ok: true, model: null, passed: [], removed: [] };
 
-  const res = await generateJson({ prompt: buildReviewPrompt(items), schema: reviewSchema, deadline });
+  const res = await generateJson({ prompt: buildReviewPrompt(items, glossary), schema: reviewSchema, deadline });
   if (!res.ok) return { ok: false, reason: res.reason };
 
   const verdicts = new Map((res.json?.reviews || []).map((r) => [r.id, r]));

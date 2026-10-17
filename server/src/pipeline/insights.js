@@ -275,8 +275,16 @@ FINDINGS
 ${JSON.stringify(findings.map(forModel), null, 2)}`;
 }
 
+/** The Express Entry pieces generateInsights() is parameterised by. */
+const EXPRESS_ENTRY_WRITER = {
+  buildPrompt: buildWriterPrompt,
+  factSheet,
+  chartDescriptions: CHART_DESCRIPTIONS,
+  glossary: glossaryText(),
+};
+
 /** Turns the writer's JSON into checkable items, each with the sources it may draw on. */
-function toItems(json, sheet, findingsById) {
+function toItems(json, sheet, findingsById, chartDescriptions = CHART_DESCRIPTIONS) {
   const sourcesOf = (ids) =>
     (ids || [])
       .filter((id) => findingsById.has(id))
@@ -304,7 +312,7 @@ function toItems(json, sheet, findingsById) {
     seen.add(n.chart);
     items.push({
       id: `note-${n.chart}`,
-      label: `Note under ${CHART_DESCRIPTIONS[n.chart] || n.chart}`,
+      label: `Note under ${chartDescriptions[n.chart] || n.chart}`,
       chart: n.chart,
       text: n.text,
       findingIds: Array.isArray(n.finding_ids) ? n.finding_ids : [],
@@ -347,6 +355,9 @@ function toSections(items) {
  * @param {object} [options]
  * @param {(stage: 'writing'|'checking', detail?: string) => void} [options.onStage]
  *   progress callback, so the report page can show the fact check as its own step
+ * @param {object} [options.writer] what differs between report types: the
+ *   writer prompt, the headline fact sheet, the chart descriptions and the
+ *   glossary. Defaults to Express Entry; see citizenship/insights.js.
  * @returns {Promise<object>}
  *   { available, reason?, model?, sections?, qa: { checked, kept, removed[], reviewer? } }
  */
@@ -354,7 +365,7 @@ export async function generateInsights(
   summary,
   config = {},
   findings = [],
-  { onStage = () => {}, budgetMs = TOTAL_BUDGET_MS } = {}
+  { onStage = () => {}, budgetMs = TOTAL_BUDGET_MS, writer = EXPRESS_ENTRY_WRITER } = {}
 ) {
   if (!llmConfigured()) {
     return { available: false, reason: 'No GOOGLE_API_KEY configured' };
@@ -367,20 +378,25 @@ export async function generateInsights(
 
     onStage('writing');
     const written = await generateJson({
-      prompt: buildWriterPrompt(summary, config, findings),
+      prompt: writer.buildPrompt(summary, config, findings),
       schema: writerSchema(charts),
       deadline,
     });
     if (!written.ok) return { available: false, reason: written.reason };
 
     onStage('checking');
-    const items = toItems(written.json, factSheet(summary, config), findingsById);
+    const items = toItems(
+      written.json,
+      writer.factSheet(summary, config),
+      findingsById,
+      writer.chartDescriptions
+    );
     const code = mechanicalCheck(items, findingsById);
 
     if (deadline - Date.now() < MIN_REVIEW_MS) {
       return { available: false, withheld: true, reason: 'No time was left to fact-check the commentary.' };
     }
-    const review = await reviewWithModel(code.passed, { deadline });
+    const review = await reviewWithModel(code.passed, { deadline, glossary: writer.glossary });
     if (!review.ok) {
       return {
         available: false,

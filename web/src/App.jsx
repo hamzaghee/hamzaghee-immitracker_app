@@ -20,6 +20,7 @@ import GroupedBarChart from './components/GroupedBarChart.jsx';
 import ChartCard from './components/ChartCard.jsx';
 import StatTile from './components/StatTile.jsx';
 import ProcessLine from './components/ProcessLine.jsx';
+import CitizenshipReport from './components/CitizenshipReport.jsx';
 import { streamColor, fmt } from './components/primitives.jsx';
 import logo from '@shared/brand/immitracker-logo.svg';
 import {
@@ -65,6 +66,8 @@ export default function App() {
   const [error, setError] = useState(null);
   const [needsAuth, setNeedsAuth] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The configuration last submitted, so the progress page can name the report type.
+  const [submitted, setSubmitted] = useState(null);
   const [downloading, setDownloading] = useState(null);
   const pollRef = useRef(null);
 
@@ -130,6 +133,7 @@ export default function App() {
     setError(null);
     try {
       const started = await startReport(config);
+      setSubmitted(config);
       setJob(started);
       setPhase('progress');
     } catch (e) {
@@ -162,6 +166,8 @@ export default function App() {
   const s = result?.summary;
   const meta = result?.meta;
   const config = result?.config;
+  const programLabel =
+    config?.programLabel || options?.reportTypes?.find((t) => t.value === submitted?.reportType)?.label;
 
   const streams = useMemo(
     () => toSorted(s?.streamDistribution).map((d) => ({ ...d, color: streamColor(d.label) })),
@@ -196,7 +202,7 @@ export default function App() {
     <header className="masthead">
       <div className="brand">
         <img className="brand-mark" src={logo} alt="Immitracker" />
-        <h1>Express Entry Processing Insights</h1>
+        <h1>{phase === 'config' || !programLabel ? 'Processing Insights' : `${programLabel} Processing Insights`}</h1>
       </div>
     </header>
   );
@@ -251,6 +257,38 @@ export default function App() {
   }
 
   /* ---------------- report ---------------- */
+
+  const reportBar = (
+    <>
+      <div className="report-bar">
+        <button className="link-btn" onClick={backToConfig}>
+          ← New report
+        </button>
+        <div className="report-downloads">
+          <button className="secondary" disabled={downloading} onClick={() => download('html')}>
+            {downloading === 'html' ? 'Preparing…' : 'Download as HTML'}
+          </button>
+          <button className="primary" disabled={downloading} onClick={() => download('pdf')}>
+            {downloading === 'pdf' ? 'Rendering…' : 'Download as PDF'}
+          </button>
+        </div>
+      </div>
+
+      {error ? <p className="dataset-msg error">{error}</p> : null}
+      {result.notice ? <p className="note-banner">{result.notice}</p> : null}
+    </>
+  );
+
+  // Citizenship has its own summary shape and layout.
+  if (config?.reportType === 'citizenship') {
+    return (
+      <div className="app">
+        {header}
+        {reportBar}
+        <CitizenshipReport result={result} overrides={overrides} onChange={setOverrides} />
+      </div>
+    );
+  }
 
   const caseRow = (c) => ({
     key: c.slug || c.caseId,
@@ -347,23 +385,7 @@ export default function App() {
   return (
     <div className="app">
       {header}
-
-      <div className="report-bar">
-        <button className="link-btn" onClick={backToConfig}>
-          ← New report
-        </button>
-        <div className="report-downloads">
-          <button className="secondary" disabled={downloading} onClick={() => download('html')}>
-            {downloading === 'html' ? 'Preparing…' : 'Download as HTML'}
-          </button>
-          <button className="primary" disabled={downloading} onClick={() => download('pdf')}>
-            {downloading === 'pdf' ? 'Rendering…' : 'Download as PDF'}
-          </button>
-        </div>
-      </div>
-
-      {error ? <p className="dataset-msg error">{error}</p> : null}
-      {result.notice ? <p className="note-banner">{result.notice}</p> : null}
+      {reportBar}
 
       <div className="tile-row">
         <StatTile label="Cases Submitted" value={s.totalRecordsAnalyzed} foot="In the selected period" />

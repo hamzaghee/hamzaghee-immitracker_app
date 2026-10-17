@@ -150,18 +150,22 @@ const DONE = new Set(['PPR', 'Landed']);
 /**
  * The process line: each stage with its count, share of the total, a relative
  * size for the marker, and whether it is a finished state.
+ *
+ * Express Entry by default. Citizenship passes its own finished states and
+ * `withRefused: false` — its tracker records no refusals — and gets
+ * `refused: null` back.
  */
-export function processStages(s) {
+export function processStages(s, { done = DONE, withRefused = true } = {}) {
   const stages = s.stageCounts || [];
   const total = s.totalRecordsAnalyzed || 0;
-  const refused = { status: 'Refused', label: 'Refused', count: s.refusalCount || 0 };
-  const max = Math.max(1, ...stages.map((x) => x.count), refused.count);
+  const refused = withRefused ? { status: 'Refused', label: 'Refused', count: s.refusalCount || 0 } : null;
+  const max = Math.max(1, ...stages.map((x) => x.count), refused?.count ?? 0);
   // Area, not diameter, tracks the count — so the radius goes with the root.
   const size = (n) => Math.round(12 + 26 * Math.sqrt(n / max));
   const shape = (x, tone) => ({ ...x, pct: pct(x.count, total), size: size(x.count), tone });
   return {
-    stages: stages.map((x) => shape(x, DONE.has(x.status) ? 'done' : 'active')),
-    refused: shape(refused, 'refused'),
+    stages: stages.map((x) => shape(x, done.has(x.status) ? 'done' : 'active')),
+    refused: refused && shape(refused, 'refused'),
     other: s.otherStatusCount || 0,
   };
 }

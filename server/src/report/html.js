@@ -63,14 +63,14 @@ const richText = (s, title) =>
 
 /* ---------------- building blocks ---------------- */
 
-const tile = ({ label, value, unit, foot, featured = false }) => `
+export const tile = ({ label, value, unit, foot, featured = false }) => `
   <div class="tile${featured ? ' featured' : ''}">
     <div class="tile-label">${esc(label)}</div>
     <div class="tile-value">${fmt(value)}${unit ? `<span class="unit">${esc(unit)}</span>` : ''}</div>
     ${foot ? `<div class="tile-foot">${esc(foot)}</div>` : ''}
   </div>`;
 
-const card = (title, desc, body, legend = '', note = '', insight = '') => `
+export const card = (title, desc, body, legend = '', note = '', insight = '') => `
   <section class="card">
     <h3>${esc(title)}</h3>
     ${desc ? `<p class="desc">${esc(desc)}</p>` : ''}
@@ -81,7 +81,7 @@ const card = (title, desc, body, legend = '', note = '', insight = '') => `
   </section>`;
 
 /** One analysis section: the Analysis block's cards and the notes under charts. */
-const sectionBlock = (sec, cls = 'an') => `<div class="${cls}">
+export const sectionBlock = (sec, cls = 'an') => `<div class="${cls}">
       <h4>${esc(sec.title)}${
         sectionTagLabel(sec.source)
           ? `<span class="tag">${esc(sectionTagLabel(sec.source))}</span>`
@@ -91,19 +91,19 @@ const sectionBlock = (sec, cls = 'an') => `<div class="${cls}">
     </div>`;
 
 /** Looks up the AI note for a chart; most charts have none. */
-const insightLookup = (sections) => {
+export const insightLookup = (sections) => {
   const byChart = new Map(sections.filter((x) => x.chart).map((x) => [x.chart, x]));
   return (chart) => (byChart.has(chart) ? sectionBlock(byChart.get(chart), 'an inline') : '');
 };
 
-const legendOf = (items) => `
+export const legendOf = (items) => `
   <div class="legend">${items
     .map((i) => `<span class="li"><span class="sw" style="background:${i.color}"></span>${esc(i.label)}</span>`)
     .join('')}</div>`;
 
 /* ---------------- sections ---------------- */
 
-const headerSection = (config) => `
+export const headerSection = (config) => `
   <header class="masthead">
     <img class="brand-mark" src="${LOGO_SVG}" alt="Immitracker">
     <h1>${esc(config.programLabel || 'Express Entry')} Processing Insights</h1>
@@ -151,9 +151,12 @@ function milestonesSection(s, insightFor) {
   ${processSection(s, insightFor)}`;
 }
 
-/** Same structure as web/src/components/ProcessLine.jsx. */
-function processSection(s, insightFor) {
-  const { stages, refused, other } = processStages(s);
+/**
+ * Same structure as web/src/components/ProcessLine.jsx. Express Entry by
+ * default; Citizenship passes its own stages (no Refused marker) and note.
+ */
+export function processSection(s, insightFor, { data = processStages(s), note = PROCESS_NOTE, chart = CHART.process } = {}) {
+  const { stages, refused, other } = data;
   if (!stages.length) return '';
   const stage = (st, tag = 'li', cls = 'stage') => `
     <${tag} class="${cls} tone-${st.tone}">
@@ -167,15 +170,15 @@ function processSection(s, insightFor) {
     <h3>Where applications are now</h3>
     <div class="process">
       <ol class="process-line">${stages.map((st) => stage(st)).join('')}</ol>
-      ${stage(refused, 'div', 'stage process-aside')}
+      ${refused ? stage(refused, 'div', 'stage process-aside') : ''}
     </div>
-    <p class="card-note">${esc(PROCESS_NOTE + otherNote)}</p>
-    ${insightFor(CHART.process)}
+    <p class="card-note">${esc(note + otherNote)}</p>
+    ${insightFor(chart)}
   </section>`;
 }
 
 /** The Analysis block. Chart notes are placed under their charts instead. */
-function analysisSection(sections) {
+export function analysisSection(sections) {
   const own = sections.filter((sec) => !sec.chart);
   if (!own.length) return '';
   return `<h2>Analysis</h2>
@@ -280,7 +283,7 @@ function chartsSection(s, config, P, insightFor) {
 
 /* ---------------- document ---------------- */
 
-const styles = (P) => `
+export const styles = (P) => `
   ${FONT_FACE}
   *{box-sizing:border-box}
   body{margin:0;background:${P.page};color:${P.textPrimary};

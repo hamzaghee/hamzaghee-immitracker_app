@@ -23,6 +23,7 @@ import {
   clearAllDatasets,
   hasDataset,
   defaultDatasetId,
+  datasetTracker,
 } from './dataStore.js';
 import {
   filterByWindow,
@@ -48,7 +49,9 @@ import {
   renderJobHtml,
   reportFilename,
   listReportTypes,
+  assertDatasetMatches,
 } from './reports.js';
+import { listApplicationTypes, listProvinces } from './pipeline/citizenship/filters.js';
 import { htmlToPdf, pdfAvailable, reapOrphanedBrowsers } from './report/pdf.js';
 import { costlyLimiters, pollLimiter, loginLimiter, trustProxySetting } from './rateLimit.js';
 import { isDemo, isProduction, publicConfig, APP_MODE } from './config.js';
@@ -103,6 +106,20 @@ function readDataset(query) {
 }
 
 /**
+ * /api/summary, /api/cases and /api/insights read Express Entry fields. A
+ * citizenship dataset would come back as empty charts, so it is refused; its
+ * reports go through /api/reports.
+ */
+function assertExpressEntry(datasetId) {
+  if (datasetTracker(datasetId) !== 'express-entry') {
+    throw Object.assign(
+      new Error('This endpoint covers Express Entry datasets. Create a Citizenship report through /api/reports.'),
+      { status: 400, code: 'DATASET_MISMATCH' }
+    );
+  }
+}
+
+/**
  * Reads the window controls off the query string.
  * Defaults reproduce the n8n node: 18 months on "Submitted".
  * `months=all` disables the window.
@@ -138,6 +155,7 @@ function readWindow(query) {
 function computeSummary(query, { excludeOutliers = false } = {}) {
   const { months, dateField } = readWindow(query);
   const datasetId = readDataset(query);
+  assertExpressEntry(datasetId);
   const all = getRecords(datasetId);
   const byPeriod =
     query.from || query.to
@@ -220,6 +238,9 @@ app.get('/api/report-options', (_req, res) => {
   res.json({
     reportTypes: listReportTypes(),
     streams: listStreamGroups(),
+    // Citizenship's filters in place of streams.
+    applicationTypes: listApplicationTypes(),
+    provinces: listProvinces(),
     ...publicConfig(),
   });
 });
@@ -249,6 +270,7 @@ app.post('/api/reports', costlyLimiters, (req, res, next) => {
   try {
     const config = normaliseConfig(req.body);
     const datasetId = readDataset({ dataset: config.datasetId });
+    assertDatasetMatches(config.reportType, datasetId);
     const dataset = listDatasets().find((d) => d.id === datasetId);
     const job = startReport({ ...config, datasetId, datasetName: dataset?.name });
     res.status(202).json(jobStatus(job));
@@ -382,7 +404,9 @@ app.get('/api/summary', (req, res, next) => {
 app.get('/api/cases', (req, res, next) => {
   try {
     const { months, dateField } = readWindow(req.query);
-    let rows = filterByWindow(getRecords(readDataset(req.query)), { months, dateField });
+    const datasetId = readDataset(req.query);
+    assertExpressEntry(datasetId);
+    let rows = filterByWindow(getRecords(datasetId), { months, dateField });
 
     if (req.query.stream) rows = rows.filter((r) => r['Stream'] === req.query.stream);
     if (req.query.status) rows = rows.filter((r) => r['Current Status'] === req.query.status);

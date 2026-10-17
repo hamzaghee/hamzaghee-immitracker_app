@@ -488,6 +488,11 @@ body {
   grid-row: span 2;
 }
 
+/* Citizenship has eight step tiles: three rows beside the headline. */
+.milestone-grid.tall .featured {
+  grid-row: span 3;
+}
+
 .tile-note {
   display: flex;
   align-items: flex-start;
@@ -1342,7 +1347,8 @@ button.secondary:disabled {
   .milestone-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .milestone-grid .featured {
+  .milestone-grid .featured,
+  .milestone-grid.tall .featured {
     grid-row: auto;
     grid-column: 1 / -1;
   }

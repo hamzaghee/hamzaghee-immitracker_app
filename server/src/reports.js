@@ -11,7 +11,7 @@
  */
 
 import crypto from 'node:crypto';
-import { getRecords } from './dataStore.js';
+import { getRecords, datasetTracker } from './dataStore.js';
 import { filterByWindow } from './pipeline/filter.js';
 import {
   filterByStream,
@@ -28,14 +28,76 @@ import {
   periodLabel,
 } from './pipeline/insights.js';
 import { renderReportHtml } from './report/html.js';
+import { F as CZ } from './pipeline/citizenship/fieldMap.js';
+import { filterCitizenship, normaliseCitizenshipFilters } from './pipeline/citizenship/filters.js';
+import { analyzeCitizenship } from './pipeline/citizenship/analyze.js';
+import { buildCitizenshipFindings } from './pipeline/citizenship/findings.js';
+import { citizenshipComputedSections, CITIZENSHIP_WRITER } from './pipeline/citizenship/insights.js';
+import { renderCitizenshipHtml } from './report/citizenshipHtml.js';
 
 const MAX_JOBS = Number(process.env.MAX_REPORT_JOBS) || 20;
 
+/** `tracker` is the export a report type runs on; see dataStore.js. */
 export const REPORT_TYPES = {
-  'express-entry': { label: 'Express Entry', available: true },
-  'spousal-sponsorship': { label: 'Spousal Sponsorship', available: false },
-  citizenship: { label: 'Citizenship', available: false },
+  'express-entry': { label: 'Express Entry', available: true, tracker: 'express-entry' },
+  'spousal-sponsorship': { label: 'Spousal Sponsorship', available: false, tracker: null },
+  citizenship: { label: 'Citizenship', available: true, tracker: 'citizenship' },
 };
+
+/**
+ * What each report type does at each stage. The job runner below is the same
+ * for every type; only these differ.
+ */
+const PROGRAMS = {
+  'express-entry': {
+    // With neither bound set, filterByWindow falls back to the n8n rolling window.
+    filter: (all, config) => {
+      const byPeriod = filterByWindow(all, { from: config.from, to: config.to });
+      return { byPeriod, filtered: filterByStream(byPeriod, config.stream) };
+    },
+    // The comparison chart is fed the period-filtered rows *before* the stream
+    // filter, so it always spans all programmes even when one stream is selected.
+    analyze: (filtered, byPeriod) => analyze(filtered, { comparisonRecords: byPeriod, excludeOutliers: true }),
+    findings: buildFindings,
+    computed: computedSections,
+    writer: undefined,
+    render: renderReportHtml,
+    noMatch: 'No cases match this configuration. Try widening the period or choosing All Streams.',
+  },
+  citizenship: {
+    // The period is on the date the application was sent.
+    filter: (all, config) => {
+      const byPeriod = filterByWindow(all, { from: config.from, to: config.to, dateField: CZ.sent });
+      return { byPeriod, filtered: filterCitizenship(byPeriod, config) };
+    },
+    analyze: (filtered) => analyzeCitizenship(filtered, { excludeOutliers: true }),
+    findings: buildCitizenshipFindings,
+    computed: citizenshipComputedSections,
+    writer: CITIZENSHIP_WRITER,
+    render: renderCitizenshipHtml,
+    noMatch: 'No cases match this configuration. Try widening the period, or choosing all provinces or application types.',
+  },
+};
+
+/**
+ * Refuses a report on the wrong tracker's export — an Express Entry report of
+ * a citizenship file would run, and every chart would be empty.
+ */
+export function assertDatasetMatches(reportType, datasetId) {
+  const want = REPORT_TYPES[reportType]?.tracker;
+  const have = datasetTracker(datasetId);
+  if (want && have !== want) {
+    const name = (t) => Object.values(REPORT_TYPES).find((x) => x.tracker === t)?.label || t;
+    const a = (t) => `${/^[AEIOU]/i.test(name(t)) ? 'an' : 'a'} ${name(t)}`;
+    throw Object.assign(
+      new Error(
+        `This dataset is ${a(have)} tracker export, so it can only produce ${a(have)} report. ` +
+          `Choose the ${name(have)} report type, or upload ${a(want)} export.`
+      ),
+      { status: 400, code: 'DATASET_MISMATCH' }
+    );
+  }
+}
 
 export const listReportTypes = () =>
   Object.entries(REPORT_TYPES).map(([value, v]) => ({ value, ...v }));
@@ -87,20 +149,23 @@ export function normaliseConfig(body = {}) {
     );
   }
 
-  const stream = body.stream || DEFAULT_STREAM_GROUP;
-  if (!isStreamGroup(stream)) {
-    throw Object.assign(new Error(`Unknown stream: ${stream}`), { status: 400 });
-  }
-
-  return {
+  const common = {
     reportType,
     programLabel: type.label,
-    stream,
-    streamLabel: streamGroupLabel(stream),
     from: body.from || undefined,
     to: body.to || undefined,
     datasetId: body.datasetId || undefined,
   };
+
+  if (reportType === 'citizenship') {
+    return { ...common, ...normaliseCitizenshipFilters(body) };
+  }
+
+  const stream = body.stream || DEFAULT_STREAM_GROUP;
+  if (!isStreamGroup(stream)) {
+    throw Object.assign(new Error(`Unknown stream: ${stream}`), { status: 400 });
+  }
+  return { ...common, stream, streamLabel: streamGroupLabel(stream) };
 }
 
 /**
@@ -137,13 +202,12 @@ export function startReport(config) {
 
 async function run(job) {
   const { config } = job;
+  const program = PROGRAMS[config.reportType];
 
   // 1. filter
   setStep(job, 'filtering', 'running');
   const all = getRecords(config.datasetId);
-  // With neither bound set, filterByWindow falls back to the n8n rolling window.
-  const byPeriod = filterByWindow(all, { from: config.from, to: config.to });
-  const filtered = filterByStream(byPeriod, config.stream);
+  const { byPeriod, filtered } = program.filter(all, config);
   setStep(
     job,
     'filtering',
@@ -152,24 +216,18 @@ async function run(job) {
   );
 
   if (!filtered.length) {
-    throw Object.assign(
-      new Error('No cases match this configuration. Try widening the period or choosing All Streams.'),
-      { status: 400 }
-    );
+    throw Object.assign(new Error(program.noMatch), { status: 400 });
   }
 
   // 2. analyse
-  //
-  // The comparison chart is fed the period-filtered rows *before* the stream
-  // filter, so it always spans all programmes even when one stream is selected.
   //
   // Extreme processing times are left out of every timing figure; each chart
   // they would have changed says so. The findings are the questions the AI
   // analysis is written from (see pipeline/findings.js).
   setStep(job, 'analysing', 'running');
-  const summary = analyze(filtered, { comparisonRecords: byPeriod, excludeOutliers: true });
+  const summary = program.analyze(filtered, byPeriod);
   job.summary = summary;
-  const { findings, asked } = buildFindings(filtered, summary);
+  const { findings, asked } = program.findings(filtered, summary);
   setStep(
     job,
     'analysing',
@@ -182,8 +240,9 @@ async function run(job) {
   // 3. written analysis, then its fact check — degrades rather than failing
   // the report
   setStep(job, 'ai-analysis', 'running');
-  const computed = computedSections(summary, labelled);
+  const computed = program.computed(summary, labelled);
   const generated = await generateInsights(summary, labelled, findings, {
+    writer: program.writer,
     onStage: (stage) => {
       if (stage === 'checking') {
         setStep(job, 'ai-analysis', 'done');
@@ -279,7 +338,7 @@ export function renderJobHtml(job, overrides = {}) {
     .filter((s) => !hidden.has(s.id))
     .map((s) => (text[s.id] ? { ...s, body: text[s.id], source: 'edited' } : s));
 
-  return renderReportHtml({
+  return PROGRAMS[job.config.reportType].render({
     summary: job.summary,
     sections,
     config: job.config,
@@ -287,8 +346,19 @@ export function renderJobHtml(job, overrides = {}) {
   });
 }
 
-/** Filename stem for downloads, e.g. express-entry-cec-2026-08-12 */
-export const reportFilename = (job) =>
-  [job.config.reportType, job.config.stream, new Date(job.meta?.generatedAt || Date.now()).toISOString().slice(0, 10)]
+const slug = (v) => String(v).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/**
+ * Filename stem for downloads, e.g. express-entry-cec-2026-08-12 or
+ * citizenship-family-ontario-2026-10-16. "All" filters are left out.
+ */
+export const reportFilename = (job) => {
+  const c = job.config;
+  const filters =
+    c.reportType === 'citizenship'
+      ? [c.applicationType, c.province].filter((v) => v && v !== 'all').map(slug)
+      : [c.stream];
+  return [c.reportType, ...filters, new Date(job.meta?.generatedAt || Date.now()).toISOString().slice(0, 10)]
     .filter(Boolean)
     .join('-');
+};

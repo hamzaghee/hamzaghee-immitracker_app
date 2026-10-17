@@ -115,6 +115,39 @@ Uploads persist in `server/uploads/` across restarts. Remove one with the
 **Remove** link, or wipe them all with **Clear all** (shown once you have two or
 more) to get back to the empty state.
 
+## Citizenship reports
+
+Exports from the **Canadian Citizenship Processing Tracker** are recognised on
+upload by their field ids (`server/src/pipeline/citizenship/detect.js`), and the
+dataset is tagged with its tracker. Each report type runs only on its own
+tracker's export: the setup page switches the report type to match the dataset,
+and `POST /api/reports` refuses a mismatch with `code: "DATASET_MISMATCH"`.
+
+The report measures the process from start to finish — each step, the total,
+and both across province, application type, nationality, IRCC office and the
+extra checks (interview, fingerprint request, urgent processing). The rules
+behind its figures:
+
+- **The finish line is the decision.** The tracker records no refusals, and
+  most applicants leave the decision date blank, so the first later date filled
+  in stands in for it: oath letter, then oath ceremony, then certificate. The
+  report says how many cases were measured to each.
+- **Durations come from the dates**, not the tracker's own "Days from …"
+  columns. On the 25 publicly visible cases the two agree on all 76 spans that
+  both cover.
+- **Groups need 5 decided cases** to appear in a step-by-step chart, and step
+  averages need not add up to the total, since each comes from the cases that
+  recorded both of its dates.
+- **No processing time is broken down by month.** Monthly applications are
+  shown as volume only.
+- **No comparison with IRCC estimates** — left for a later stage.
+
+The filters are application type and province, and the period is on the
+*Application Sent* date. `/api/summary`, `/api/cases` and `/api/insights` remain
+Express Entry only. The demo ships a synthetic sample of each tracker;
+regenerate the citizenship one with
+`node server/demo/generate-citizenship-sample.mjs`.
+
 ## Verifying the port
 
 The workflow export carries `pinData` for the "Filter 18 months" node — a real

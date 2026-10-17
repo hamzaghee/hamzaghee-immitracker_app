@@ -2,6 +2,8 @@ import { useRef, useState } from 'react';
 import { uploadDataset, deleteDataset, clearDatasets } from '../api.js';
 import { fmt } from './primitives.jsx';
 
+const TRACKER_LABELS = { 'express-entry': 'Express Entry', citizenship: 'Citizenship' };
+
 /**
  * Upload + dataset picker.
  *
@@ -125,8 +127,8 @@ export default function DatasetControl({
         </div>
         <p className="hero-note">
           A JSON array of case objects — an object wrapping a <code>data</code> or{' '}
-          <code>records</code> array works too. 32 Immitracker field ids are recognised and
-          relabelled; everything else passes through untouched. Nothing is loaded until you upload.
+          <code>records</code> array works too. Express Entry and Citizenship tracker exports are
+          recognised and relabelled; everything else passes through untouched. Nothing is loaded until you upload.
         </p>
         {error ? <p className="dataset-msg error">{error}</p> : null}
         {fileInput}
@@ -150,6 +152,7 @@ export default function DatasetControl({
             {datasets.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name}
+                {d.tracker ? ` — ${TRACKER_LABELS[d.tracker] || d.tracker}` : ''}
                 {d.sourceCount ? ` — ${fmt(d.sourceCount)} rows` : ''}
               </option>
             ))}
@@ -201,8 +204,8 @@ export default function DatasetControl({
       {error ? <p className="dataset-msg error">{error}</p> : null}
       {unrecognised ? (
         <p className="dataset-msg warn">
-          None of the 32 known Immitracker field ids were found in this file, so the charts will be
-          empty. It parsed as JSON, but it does not look like a case export.
+          None of the known Express Entry or Citizenship field ids were found in this file, so the
+          charts will be empty. It parsed as JSON, but it does not look like a case export.
         </p>
       ) : null}
     </div>

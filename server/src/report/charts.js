@@ -229,3 +229,61 @@ export function vBar(data, { width = 620, height = 200, suffix = '', palette = P
 
   return `<svg viewBox="0 0 ${width} ${baseY + labelH}" width="100%" height="${baseY + labelH}" role="img">${grid}${bars}</svg>`;
 }
+
+/**
+ * Stacked horizontal bars — the step-by-step charts. One bar per group, one
+ * segment per step, and the group's average total printed at the end.
+ *
+ * data: [{ label, total, segments: [{ value, slot }] }]
+ *
+ * The segments are step averages over different sets of cases, so they need
+ * not add up to the total; the bar shows the steps and the label the total.
+ * A segment with no value is skipped rather than drawn at zero.
+ */
+export function stackedBar(data, { width = 620, gutter = 150, thickness = 18, gap = 12, palette = PALETTE } = {}) {
+  const P = palette;
+  if (!data.length) return `<p class="empty">No group has enough decided cases for this selection.</p>`;
+  const band = thickness + gap;
+  const padTop = 6;
+  const axisH = 26;
+  const plotH = data.length * band;
+  const h = plotH + padTop + axisH;
+  const g = Math.max(60, Math.min(gutter, width * 0.38));
+  const plotW = Math.max(60, width - g - 92);
+  const sum = (d) => d.segments.reduce((n, s) => n + (s.value || 0), 0);
+  const { ticks, max } = niceTicks(Math.max(0, ...data.map((d) => Math.max(sum(d), d.total || 0))));
+  const sx = (v) => (max ? (v / max) * plotW : 0);
+
+  const grid = ticks
+    .map(
+      (t) =>
+        `<line x1="${g + sx(t)}" x2="${g + sx(t)}" y1="${padTop}" y2="${padTop + plotH}" stroke="${
+          t === 0 ? P.baseline : P.gridline
+        }" stroke-width="1"/>` + text(P, g + sx(t), padTop + plotH + 16, fmt(t))
+    )
+    .join('');
+
+  const bars = data
+    .map((d, i) => {
+      const y = padTop + i * band + gap / 2;
+      let x = g;
+      const segs = d.segments
+        .filter((s) => s.value)
+        .map((s) => {
+          const w = sx(s.value);
+          // 1px surface gap between segments rather than a stroke.
+          const rect = `<rect x="${x}" y="${y}" width="${Math.max(0, w - 1)}" height="${thickness}" fill="${P.series[s.slot]}"/>`;
+          x += w;
+          return rect;
+        })
+        .join('');
+      return (
+        text(P, g - 10, y + thickness / 2 + 4, truncate(d.label, Math.max(8, Math.floor(g / 6.5))), 'end', P.textSecondary) +
+        segs +
+        text(P, x + 7, y + thickness / 2 + 4, `${fmt(Math.round(d.total))}d total`, 'start', P.textSecondary)
+      );
+    })
+    .join('');
+
+  return `<svg viewBox="0 0 ${width} ${h}" width="100%" height="${h}" role="img">${grid}${bars}</svg>`;
+}
